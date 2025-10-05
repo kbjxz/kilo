@@ -1,4 +1,7 @@
 #include <concepts>
+#include <stdio.h>
+#include <stdlib.h>
+
 template<typename T>
 requires std::is_invocable_v<T>
 struct __defer: T {
@@ -19,3 +22,9 @@ struct __defer: T {
 #define defer __DEFER(__COUNTER__)
 #define __DEFER(N) __DEFER_(N)
 #define __DEFER_(N) __DEFER__(__DEFER_VARIABLE_ ## N)
+
+void panic(const char* s)
+{
+    perror(s);
+    exit(1);
+}
