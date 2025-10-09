@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <termios.h>
 #include <unistd.h>
+#include <array>
 
 void disable_raw_mode(termios);
 void enable_raw_mode(termios*);
@@ -11,6 +12,8 @@ void read_and_print_loop();
 constexpr char control_key(char c);
 char read_key();
 void process_key(char c);
+void clear_screen();
+#define die(v) panic(v, clear_screen)
 
 int main()
 {
@@ -31,7 +34,7 @@ void read_and_print_loop()
     for (;;) {
         char c = '\0';
         if (read(STDIN_FILENO, &c, 1) == -1) {
-            panic("read failed");
+            die("read");
         }
         if (iscntrl(c)) {
             printf("[ctrl] %d\r\n", c);
@@ -46,14 +49,14 @@ void read_and_print_loop()
 void disable_raw_mode(termios t)
 {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &t) == -1) {
-        panic("tcsetattr");
+        die("tcsetattr");
     }
 }
 
 void enable_raw_mode(termios* origin_termios)
 {
     if (tcgetattr(STDIN_FILENO, origin_termios) == -1) {
-        panic("tcgetattr");
+        die("tcgetattr");
     }
     
     termios raw_mode = *origin_termios;
@@ -65,7 +68,7 @@ void enable_raw_mode(termios* origin_termios)
     raw_mode.c_cc[VTIME] = 1;
 
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_mode) == -1) {
-        panic("tcsetattr");
+        die("tcsetattr");
     }
 }
 
@@ -84,7 +87,7 @@ char read_key()
             continue;
         }
         if (n == -1 &&  errno != EAGAIN) {
-            panic("read");
+            die("read");
         }
         break;
     }
@@ -98,4 +101,13 @@ void process_key(char c)
             exit(0);
             break;
     }
+}
+
+void clear_screen()
+{
+    static constexpr auto clear = std::to_array("\x1b[2J");
+    write(STDOUT_FILENO, clear.data(), clear.size()-1);
+
+    static constexpr auto reposition = std::to_array("\x1b[H");
+    write(STDOUT_FILENO, reposition.data(), reposition.size()-1);
 }

@@ -28,3 +28,12 @@ void panic(const char* s)
     perror(s);
     exit(1);
 }
+
+template <typename F>
+requires std::is_invocable_v<F>
+void panic(const char* s, F cleanup)
+{
+    cleanup();
+    perror(s);
+    exit(1);
+}
