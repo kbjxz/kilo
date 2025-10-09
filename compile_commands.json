@@ -1,0 +1,19 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-g",
+      "--std=c++20",
+      "-o",
+      "./bin/kilo",
+      "kilo.cpp"
+    ],
+    "directory": "/data00/home/kongbiao/src/kilo",
+    "file": "/data00/home/kongbiao/src/kilo/kilo.cpp",
+    "output": "/data00/home/kongbiao/src/kilo/bin/kilo"
+  }
+]

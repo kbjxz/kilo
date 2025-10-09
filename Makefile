@@ -4,9 +4,10 @@
 all: kilo
 
 kilo: kilo.cpp
-	g++ -Wall -Wextra -pedantic -g --std=c++20 -o kilo
-	chmod +x ./kilo
+	mkdir ./bin
+	g++ -Wall -Wextra -pedantic -g --std=c++20 -o ./bin/kilo kilo.cpp
+	chmod +x ./bin/kilo
 
 .PHONY: clean
 clean:
-	rm -f ./kilo
+	rm -f ./bin/kilo

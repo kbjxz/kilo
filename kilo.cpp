@@ -6,10 +6,11 @@
 
 void disable_raw_mode(termios);
 void enable_raw_mode(termios*);
+char control_key(char c);
 
 int main()
 {
-    termios origin_termios = {0};
+    termios origin_termios = {};
     enable_raw_mode(&origin_termios);
     defer { disable_raw_mode(origin_termios); };
 
@@ -55,3 +56,9 @@ void enable_raw_mode(termios* origin_termios)
         panic("tcsetattr");
     }
 }
+
+char control_key(char c)
+{
+  return (c)&0x1f;
+}
+
