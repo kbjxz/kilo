@@ -1,4 +1,5 @@
 #include "lib/defer.h"
+#include <errno.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <termios.h>
@@ -6,7 +7,10 @@
 
 void disable_raw_mode(termios);
 void enable_raw_mode(termios*);
-char control_key(char c);
+void read_and_print_loop();
+constexpr char control_key(char c);
+char read_key();
+void process_key(char c);
 
 int main()
 {
@@ -14,6 +18,16 @@ int main()
     enable_raw_mode(&origin_termios);
     defer { disable_raw_mode(origin_termios); };
 
+    for (;;) {
+        char c = read_key();
+        process_key(c);
+    } 
+
+    return 0;
+}
+
+void read_and_print_loop()
+{
     for (;;) {
         char c = '\0';
         if (read(STDIN_FILENO, &c, 1) == -1) {
@@ -27,8 +41,6 @@ int main()
             printf("[char] %d (%c)\r\n", c, c);
         }
     }
-
-    return 0;
 }
 
 void disable_raw_mode(termios t)
@@ -57,8 +69,33 @@ void enable_raw_mode(termios* origin_termios)
     }
 }
 
-char control_key(char c)
+constexpr char control_key(char c) 
 {
   return (c)&0x1f;
 }
 
+char read_key()
+{
+    int n;
+    char c;
+    for (;;) {
+        n = read(STDIN_FILENO, &c, 1);
+        if (n != 1) {
+            continue;
+        }
+        if (n == -1 &&  errno != EAGAIN) {
+            panic("read");
+        }
+        break;
+    }
+    return c;
+}
+
+void process_key(char c)
+{
+    switch (c) {
+        case control_key('q'):
+            exit(0);
+            break;
+    }
+}
