@@ -98,7 +98,9 @@ result<winsize> get_window_size()
 {
     winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
-        return {.error=errno, .value={}};
+        return {
+            .error={.err_no=errno, .msg="ioctl"}, 
+            .value={}};
     }
     assert(ws.ws_col != 0, "winsize.column<1");
     return {};

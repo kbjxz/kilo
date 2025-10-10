@@ -39,7 +39,12 @@ void panic(const char* s, F cleanup)
     exit(1);
 }
 
-template <typename T, typename Err = int>
+struct error {
+    int err_no;
+    const char* msg;
+};
+
+template <typename T, typename Err = error>
 struct result {
     Err error;
     T value;
@@ -60,3 +65,4 @@ inline void assert(bool cond, const char* fmt, ...)
     printf("\n");
 #endif
 }
+
