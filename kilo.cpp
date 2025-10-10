@@ -1,4 +1,4 @@
-#include "lib/defer.h"
+#include "lib/lib.h"
 #include <errno.h>
 #include <ctype.h>
 #include <stdio.h>
