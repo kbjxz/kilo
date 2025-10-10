@@ -5,29 +5,18 @@
 #include <termios.h>
 #include <unistd.h>
 #include <array>
+#include <sys/ioctl.h>
 
-void disable_raw_mode(termios);
-void enable_raw_mode(termios*);
-void read_and_print_loop();
-constexpr char control_key(char c);
-char read_key();
-void process_key(char c);
-void clear_screen();
-#define die(v) panic(v, clear_screen)
-
-int main()
+void clear_screen()
 {
-    termios origin_termios = {};
-    enable_raw_mode(&origin_termios);
-    defer { disable_raw_mode(origin_termios); };
+    static constexpr auto clear = std::to_array("\x1b[2J");
+    write(STDOUT_FILENO, clear.data(), clear.size()-1);
 
-    for (;;) {
-        char c = read_key();
-        process_key(c);
-    } 
-
-    return 0;
+    static constexpr auto reposition = std::to_array("\x1b[H");
+    write(STDOUT_FILENO, reposition.data(), reposition.size()-1);
 }
+
+#define die(v) panic(v, clear_screen)
 
 void read_and_print_loop()
 {
@@ -46,7 +35,8 @@ void read_and_print_loop()
     }
 }
 
-void disable_raw_mode(termios t)
+
+void disable_raw_mode(const termios t)
 {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &t) == -1) {
         die("tcsetattr");
@@ -103,11 +93,41 @@ void process_key(char c)
     }
 }
 
-void clear_screen()
-{
-    static constexpr auto clear = std::to_array("\x1b[2J");
-    write(STDOUT_FILENO, clear.data(), clear.size()-1);
 
-    static constexpr auto reposition = std::to_array("\x1b[H");
-    write(STDOUT_FILENO, reposition.data(), reposition.size()-1);
+result<winsize> get_window_size()
+{
+    winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
+        return {.error=errno, .value={}};
+    }
+    assert(ws.ws_col != 0, "winsize.column<1");
+    return {};
+}
+
+
+struct raw_moder {
+    termios origin;
+    raw_moder()
+    {
+        enable_raw_mode(&this->origin);
+    }
+    raw_moder(raw_moder&) = delete;
+    raw_moder(raw_moder&&) = delete;
+    raw_moder& operator=(raw_moder&) = delete;
+    ~raw_moder()
+    {
+        disable_raw_mode(this->origin);
+    }
+};
+
+int main()
+{
+    static raw_moder rm = {}; 
+
+    for (;;) {
+        char c = read_key();
+        process_key(c);
+    } 
+
+    return 0;
 }
