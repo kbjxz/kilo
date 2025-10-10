@@ -8,9 +8,21 @@ typedef void (*test_func)(test_handler*);
 
 struct test_case {
     const char* name;
-    void* args;
     test_func f;
+    void* args;
 };
+
+inline test_case new_case(
+    const char* name,
+    test_func f,
+    void* args = 0)
+{
+    return test_case{
+        .name = name,
+        .f = f,
+        .args = args,
+    };
+}
 
 struct test_handler {
     test_handler* parent;

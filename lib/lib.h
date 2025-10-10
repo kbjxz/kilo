@@ -148,31 +148,43 @@ struct slice {
     size_t len;
     size_t cap;
 
-    void append(T v, arena* a)
-    {
-        if (this->len < this->cap) {
-            this->data[this->len] = v;
-            this->len++;
-        }
-        
-        static const size_t default_cap = 4;
-        size_t new_cap = this->cap ? this->cap * 2 : default_cap;
-
-        byte* new_data = arena_alloc<T>(a, new_cap);
-        if (this->data) {
-            memcpy(new_data, this->data, this->len);
-        }
-
-        this->data = new_data;
-        this->len += 1;
-        this->cap = new_cap;
-    }
-    
-    T& operator[](int i) 
+    T& operator[](size_t i) 
     {
         assert(i < this->len, "out of bound! len:%d, i:%d", this->len, i);
         return this->data[i];
     }
 };
 
+template <typename T>
+void slice_append(slice<T>* s, T v, arena* a)
+{
+    if (s->len < s->cap) {
+        s->data[s->len] = v;
+        s->len++;
+    }
+    
+    static const size_t default_cap = 4;
+    size_t new_cap = s->cap ? s->cap * 2 : default_cap;
 
+    T* new_data = arena_alloc<T>(a, new_cap);
+    if (s->data) {
+        memcpy(new_data, s->data, s->len);
+    }
+
+    s->data = new_data;
+    s->len += 1;
+    s->cap = new_cap;
+}
+
+template <typename T>
+slice<T> slice_sub(slice<T> s, int beg, int end)
+{
+    assert(0 <= beg && beg <= end && end <= s.len, 
+        "index out of bound! in:[%d, %d), valid:[%d, %d)", 
+        beg, end, 0, s.len);
+    return slice<T>{
+        .data = s.data[beg],
+        .len  = end - beg,
+        .cap  = end - beg,
+    };
+}
