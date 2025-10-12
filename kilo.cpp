@@ -7,13 +7,20 @@
 #include <array>
 #include <sys/ioctl.h>
 
+static const auto screen_clear = string_from("\x1b[2J");
+static const auto cursor_reposition = string_from("\x1b[H");
+static const auto cursor_hide = string_from("\x1b[?25l");
+static const auto cursor_show = string_from("\x1b[?25h");
+static const auto tilde = string_from("~\r\n");
+static const auto last_tilde = string_from("~");
+static const auto line_erase_all = string_from("\x1b[2K");
+static const auto line_erase_left = string_from("\x1b[1K");
+static const auto line_erase_right = string_from("\x1b[K");
+
 void clear_screen()
 {
-    static constexpr auto clear = std::to_array("\x1b[2J");
-    write(STDOUT_FILENO, clear.data(), clear.size()-1);
-
-    static constexpr auto reposition = std::to_array("\x1b[H");
-    write(STDOUT_FILENO, reposition.data(), reposition.size()-1);
+    write(STDOUT_FILENO, screen_clear.data, screen_clear.len);
+    write(STDOUT_FILENO, cursor_reposition.data, cursor_reposition.len);
 }
 
 #define die(v) panic(v, clear_screen)
@@ -106,21 +113,41 @@ result<winsize> get_window_size()
     return {};
 }
 
-void draw_rows(arena* a, winsize wz)
-{
-    static const auto tilde = string_from(std::to_array("~\r\n"));
-    static const auto last_tilde = string_from(std::to_array("~"));
-    const auto len = (wz.ws_row-1) * tilde.len + last_tilde.len;
 
-    slice<char> s = {};
-    arena sractch = arena_scratch(a);
-    slice_reserve(&s, len, &sractch);
+void draw_rows(string* buf, const winsize wz, arena* a)
+{
     for (auto i = 0; i < wz.ws_row-1; i++) {
-        string_append(&s, &tilde, &sractch);
+        string_append(buf, &line_erase_right, a);
+        string_append(buf, &tilde, a);
     }
-    string_append(&s, &last_tilde, &sractch);
+    string_append(buf, &last_tilde, a);
 }
 
+void refresh_screen(const winsize wz, arena* a)
+{
+    arena scratch = {};
+    arena_scratch_from(&scratch, a);
+    a = &scratch;
+
+    const auto len = 
+        (cursor_hide.len)
+        + (screen_clear.len)
+        + (cursor_reposition.len)
+        + (wz.ws_row-1) * (line_erase_right.len + tilde.len) + last_tilde.len 
+        + (cursor_reposition.len)
+        + (cursor_show.len);
+    string buf = {};
+    string_reserve(&buf, len, a);
+
+    string_append(&buf, cursor_hide.data, cursor_hide.len, a);
+    string_append(&buf, screen_clear.data, screen_clear.len, a);    
+    string_append(&buf, cursor_reposition.data, cursor_reposition.len, a);    
+    draw_rows(&buf, wz, a);
+    string_append(&buf, cursor_reposition.data, cursor_reposition.len, a);    
+    string_append(&buf, cursor_show.data, cursor_show.len, a);    
+    
+    write(STDOUT_FILENO, buf.data, buf.len);
+}
 
 struct raw_moder {
     termios origin;

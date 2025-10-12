@@ -98,9 +98,9 @@ inline arena arena_new(
     };
 }
 
-inline arena arena_scratch(arena* a)
+inline void arena_scratch_from(arena* scratch, const arena* from)
 {
-    return *a;
+    *scratch = *from;
 }
 
 inline void arena_free(arena* a)
@@ -212,13 +212,24 @@ slice<T> slice_sub(slice<T> s, int beg, int end)
 using string = slice<char>;
 
 template <std::size_t N>
-string string_from(const std::array<char, N>& a)
+const string string_from(const std::array<char, N>& a)
 {
     return string{
         .data = a.data(),
         .len  = a.size() - 1;
         .cap  = a.size() - 1;
     };
+}
+
+template <std::size_t N>
+const string string_from(const char (&a)[N])
+{
+    return string_from(std::to_array(a));
+}
+
+void string_reserve(string* s, size_t new_cap, arena* a)
+{
+    slice_reserve(s, new_cap, a);
 }
 
 void string_append(string* s, char c, arena* a)
