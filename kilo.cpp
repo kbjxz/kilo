@@ -108,15 +108,17 @@ result<winsize> get_window_size()
 
 void draw_rows(arena* a, winsize wz)
 {
-    constexpr auto tilde = std::to_array("~\r\n");
-    constexpr auto last_tilde = std::to_array("~");
-    const auto len = (wz.ws_row-1) * (tilde.size()-1) + last_tilde.size()-1;
+    static const auto tilde = string_from(std::to_array("~\r\n"));
+    static const auto last_tilde = string_from(std::to_array("~"));
+    const auto len = (wz.ws_row-1) * tilde.len + last_tilde.len;
 
     slice<char> s = {};
-    slice_reserve(&s, len, a);
+    arena sractch = arena_scratch(a);
+    slice_reserve(&s, len, &sractch);
     for (auto i = 0; i < wz.ws_row-1; i++) {
-        slice_append(&s, 
+        string_append(&s, &tilde, &sractch);
     }
+    string_append(&s, &last_tilde, &sractch);
 }
 
 

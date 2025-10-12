@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <array>
 
 template<typename T>
 requires std::is_invocable_v<T>
@@ -95,6 +96,11 @@ inline arena arena_new(
         .end = data+size,
         .strat = strategy,
     };
+}
+
+inline arena arena_scratch(arena* a)
+{
+    return *a;
 }
 
 inline void arena_free(arena* a)
@@ -203,8 +209,17 @@ slice<T> slice_sub(slice<T> s, int beg, int end)
     };
 }
 
-struct string : public slice<char> {
-};
+using string = slice<char>;
+
+template <std::size_t N>
+string string_from(const std::array<char, N>& a)
+{
+    return string{
+        .data = a.data(),
+        .len  = a.size() - 1;
+        .cap  = a.size() - 1;
+    };
+}
 
 void string_append(string* s, char c, arena* a)
 {
@@ -220,4 +235,5 @@ void string_append(string* s, const char* v, size_t n, arena* a)
 void string_append(string* s, const string* oth, arena* a)
 {
     slice_reserve(s, s->len + oth->len, a);
+    memcpy(&s->data[s->len], oth->data, oth->len);  
 }
