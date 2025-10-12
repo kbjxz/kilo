@@ -106,6 +106,19 @@ result<winsize> get_window_size()
     return {};
 }
 
+void draw_rows(arena* a, winsize wz)
+{
+    constexpr auto tilde = std::to_array("~\r\n");
+    constexpr auto last_tilde = std::to_array("~");
+    const auto len = (wz.ws_row-1) * (tilde.size()-1) + last_tilde.size()-1;
+
+    slice<char> s = {};
+    slice_reserve(&s, len, a);
+    for (auto i = 0; i < wz.ws_row-1; i++) {
+        slice_append(&s, 
+    }
+}
+
 
 struct raw_moder {
     termios origin;

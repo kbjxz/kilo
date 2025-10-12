@@ -156,6 +156,20 @@ struct slice {
 };
 
 template <typename T>
+void slice_reserve(slice<T>* s, size_t new_cap, arena* a)
+{
+    if (s->cap >= new_cap) {
+        return;
+    }
+    T* new_data = arena_alloc<T>(a, new_cap);
+    if (s->data) {
+        memcpy(new_data, s->data, s->len);
+    }
+    s->data = new_data;
+    s->cap = new_cap;
+}
+
+template <typename T>
 void slice_append(slice<T>* s, T v, arena* a)
 {
     if (s->len < s->cap) {
@@ -187,4 +201,23 @@ slice<T> slice_sub(slice<T> s, int beg, int end)
         .len  = end - beg,
         .cap  = end - beg,
     };
+}
+
+struct string : public slice<char> {
+};
+
+void string_append(string* s, char c, arena* a)
+{
+    slice_append(s, c, a);
+}
+
+void string_append(string* s, const char* v, size_t n, arena* a)
+{
+    slice_reserve(s, s->len+ n, a);
+    memcpy(&s->data[s->len], v, n);
+}
+
+void string_append(string* s, const string* oth, arena* a)
+{
+    slice_reserve(s, s->len + oth->len, a);
 }
