@@ -46,11 +46,54 @@ struct error {
     const char* msg;
 };
 
+template <typename T>
+struct maybe {
+    T value;
+    bool ok;
+};
+
+template <typename T>
+maybe<T> some(T v)
+{
+    return maybe<T>{.value = v, .ok = true};
+}
+
+template <typename T>
+maybe<T> none()
+{
+    return maybe<T>{.value = {}, .ok = false};
+}
+
 template <typename T, typename Err = error>
 struct result {
-    Err error;
+    maybe<Err> merr;
     T value;
 };
+
+template <typename T, typename Err = error>
+result<T, Err> result_err(Err e)
+{
+    return result<T, Err>{.merr = some(e), .value ={}};
+}
+
+template <typename T, typename Err = error>
+result<T, Err> result_v(T v)
+{
+    return result<T, Err>{.merr = none<Err>(), .value =v};
+}
+
+template <typename _, typename Err>
+bool result_is_err(const result<_, Err>* r)
+{
+    return r->merr.ok;
+}
+
+template <typename _, typename Err>
+Err result_unwrap_err(const result<_, Err>* r)
+{
+    return r->merr.value;
+}
+
 
 inline void assert(bool cond, const char* fmt, ...)
 {
@@ -215,9 +258,9 @@ template <std::size_t N>
 const string string_from(const std::array<char, N>& a)
 {
     return string{
-        .data = a.data(),
-        .len  = a.size() - 1;
-        .cap  = a.size() - 1;
+        .data = (char*)((void*)(a.data())),
+        .len  = a.size() - 1,
+        .cap  = a.size() - 1,
     };
 }
 
@@ -227,23 +270,23 @@ const string string_from(const char (&a)[N])
     return string_from(std::to_array(a));
 }
 
-void string_reserve(string* s, size_t new_cap, arena* a)
+inline void string_reserve(string* s, size_t new_cap, arena* a)
 {
     slice_reserve(s, new_cap, a);
 }
 
-void string_append(string* s, char c, arena* a)
-{
-    slice_append(s, c, a);
-}
-
-void string_append(string* s, const char* v, size_t n, arena* a)
+inline void string_append(string* s, const char* v, size_t n, arena* a)
 {
     slice_reserve(s, s->len+ n, a);
     memcpy(&s->data[s->len], v, n);
 }
 
-void string_append(string* s, const string* oth, arena* a)
+inline void string_append(string* s, char c, arena* a)
+{
+    slice_append(s, c, a);
+}
+
+inline void string_append(string* s, const string* oth, arena* a)
 {
     slice_reserve(s, s->len + oth->len, a);
     memcpy(&s->data[s->len], oth->data, oth->len);  

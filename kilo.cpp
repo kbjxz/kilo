@@ -107,12 +107,10 @@ result<winsize> get_window_size()
 {
     winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
-        return {
-            .error={.err_no=errno, .msg="ioctl"}, 
-            .value={}};
+        return result_err<winsize>({.err_no=errno, .msg="ioctl"}); 
     }
     assert(ws.ws_col != 0, "winsize.column<1");
-    return {};
+    return result_v<winsize>(ws); 
 }
 
 
@@ -183,8 +181,15 @@ struct raw_moder {
 int main()
 {
     static raw_moder rm = {}; 
+    arena a = arena_new(4 * 1024 * 1024, ARENA_STRATEGY_PANIC);
 
     for (;;) {
+        const auto winsize_result = get_window_size();
+        if (result_is_err(&winsize_result)) {
+            die(result_unwrap_err(&winsize_result).msg);
+        }
+
+        refresh_screen(winsize_result.value, &a);
         char c = read_key();
         process_key(c);
     } 
