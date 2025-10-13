@@ -277,8 +277,9 @@ inline void string_reserve(string* s, size_t new_cap, arena* a)
 
 inline void string_append(string* s, const char* v, size_t n, arena* a)
 {
-    slice_reserve(s, s->len+ n, a);
+    slice_reserve(s, s->len + n, a);
     memcpy(&s->data[s->len], v, n);
+    s->len += n;
 }
 
 inline void string_append(string* s, char c, arena* a)
@@ -290,4 +291,5 @@ inline void string_append(string* s, const string* oth, arena* a)
 {
     slice_reserve(s, s->len + oth->len, a);
     memcpy(&s->data[s->len], oth->data, oth->len);  
+    s->len += oth->len;
 }
