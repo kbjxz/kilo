@@ -12,12 +12,12 @@ static const auto cursor_reposition = string_from("\x1b[H");
 static const auto cursor_hide = string_from("\x1b[?25l");
 static const auto cursor_show = string_from("\x1b[?25h");
 static const auto tilde_new_line = string_from("~\r\n");
-static const auto tilde = string_from("~");
 static const auto line_erase_all = string_from("\x1b[2K");
 static const auto line_erase_left = string_from("\x1b[1K");
 static const auto line_erase_right = string_from("\x1b[K");
 static const auto welcome_prefix= string_from("Kilo editor -- version ");
 static const auto kilo_version = string_from(KILO_VERSION);
+static const auto newline = string_from("\r\n");
 
 void clear_screen()
 {
@@ -54,18 +54,35 @@ void disable_raw_mode(const termios t)
 
 void enable_raw_mode(termios* origin_termios)
 {
+    if (!isatty(STDIN_FILENO)) {
+        die("STDIN_FILENO not associated with terminal");
+    }
+
     if (tcgetattr(STDIN_FILENO, origin_termios) == -1) {
         die("tcgetattr");
     }
     
     termios raw_mode = *origin_termios;
-    raw_mode.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    raw_mode.c_oflag &= ~(OPOST);
-    raw_mode.c_cflag |= (CS8);
-    raw_mode.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-    raw_mode.c_cc[VMIN] = 0;
-    raw_mode.c_cc[VTIME] = 1;
 
+    /* input modes: no break, no CR to NL, no parity check, no strip char,
+     * no start/stop output control. */
+    raw_mode.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    
+    /* output modes - disable post processing */
+    raw_mode.c_oflag &= ~(OPOST);
+    
+    /* control modes - set 8 bit chars */
+    raw_mode.c_cflag |= (CS8);
+    
+    /* local modes - choing off, canonical off, no extended functions,
+     * no signal chars (^Z,^C) */
+    raw_mode.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+
+    /* control chars - set return condition: min number of bytes and timer. */
+    raw_mode.c_cc[VMIN] = 0;  /* Return each byte, or zero for timeout. */
+    raw_mode.c_cc[VTIME] = 1; /* 100 ms timeout (unit is tens of second). */
+
+    /* put terminal in raw mode after flushing */
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_mode) == -1) {
         die("tcsetattr");
     }
@@ -113,35 +130,38 @@ result<winsize> get_window_size()
     return result_v<winsize>(ws); 
 }
 
+void append_tilde_erase_right(string* buf, bool linebreak, arena* a)
+{
+    string_append(buf, '~', a);
+    string_append(buf, &line_erase_right, a);
+    if (linebreak) {
+        string_append(buf, &newline, a);
+    }
+}
 
 void draw_rows(string* buf, const winsize wz, arena* a)
 {
-    auto i = 0;
-    // ~
-    for (;i < wz.ws_row/3;i++) {
-        string_append(buf, &line_erase_right, a);
-        string_append(buf, &tilde_new_line, a);
-    }
-    
-    // welcome message
-    const auto welcome_len = 
-        (welcome_prefix.len + kilo_version.len) <= wz.ws_col 
-        ? (welcome_prefix.len + kilo_version.len) 
-        : wz.ws_col;
-    const auto padding_len = (wz.ws_col - welcome_len) / 2;
-    for (size_t i = 0; i < padding_len; i++) {
-        string_append(buf, &tilde, a);
-    }
-    string_append(buf, &welcome_prefix, a);
-    string_append(buf, &kilo_version, a);
+    for (auto i = 0; i < wz.ws_row; i++) {
+        if (i != wz.ws_row / 3) {
+            append_tilde_erase_right(buf, i < wz.ws_row - 1, a); 
+            continue;
+        }
 
-
-    // ~
-    for (; i < wz.ws_row-1; i++) {
-        string_append(buf, &line_erase_right, a);
-        string_append(buf, &tilde_new_line, a);
+        // draw welcome message in screen
+        const auto welcome_len = 
+            (welcome_prefix.len + kilo_version.len) <= wz.ws_col 
+            ? (welcome_prefix.len + kilo_version.len) 
+            : wz.ws_col;
+        const auto padding_len = (wz.ws_col - welcome_len) / 2;
+        if (padding_len > 0) {
+            string_append(buf, '~', a);
+        }
+        for (size_t i = 0; i + 1 < padding_len; i++) {
+            string_append(buf, ' ', a);
+        }
+        string_append(buf, &welcome_prefix, a);
+        string_append(buf, &kilo_version, a);
     }
-    string_append(buf, &tilde, a); // last ~
 }
 
 void refresh_screen(const winsize wz, arena* a)
@@ -153,12 +173,11 @@ void refresh_screen(const winsize wz, arena* a)
     string buf = {};
     string_reserve(&buf, 8192, a);
 
-    string_append(&buf, cursor_hide.data, cursor_hide.len, a);
-    string_append(&buf, screen_clear.data, screen_clear.len, a);    
-    string_append(&buf, cursor_reposition.data, cursor_reposition.len, a);    
+    string_append(&buf, &cursor_hide, a);
+    string_append(&buf, &cursor_reposition, a);    
     draw_rows(&buf, wz, a);
-    string_append(&buf, cursor_reposition.data, cursor_reposition.len, a);    
-    string_append(&buf, cursor_show.data, cursor_show.len, a);    
+    string_append(&buf, &cursor_reposition, a);    
+    string_append(&buf, &cursor_show, a);    
     
     write(STDOUT_FILENO, buf.data, buf.len);
 }
