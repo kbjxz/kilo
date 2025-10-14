@@ -297,27 +297,37 @@ inline void string_append(string* s, const string* oth, arena* a)
 
 #define KB 1024
 
+/* 
+    chunk anatomy (not to scale):
+            heap_size                               stack_size
+        /              \                        /               \      
+        |      ...     |      free space        |      ...      |  basic_arena_chunk  |
+        ^                                                       ^  |
+        .data                                            .data+cap |    
+        |__________________________________________________________|
+*/ 
 struct basic_arena_chunk {
     basic_arena_chunk* next;
     byte* data;
-    int32_t len;
+    int32_t heap_size;
+    int32_t stack_size;
     int32_t cap;
 };
 
 static inline basic_arena_chunk* 
-make_chunk(
-    int32_t size, 
-    basic_arena_chunk* next
-)
+make_chunk(int32_t size, basic_arena_chunk* next)
 {
     auto block_size = size + sizeof(basic_arena_chunk);
     auto block = malloc(block_size);
     assert(block, "malloc");
     auto chunk = (basic_arena_chunk*)((byte*)(block)+size);
-    chunk->next = next; 
-    chunk->data = (byte*)block;
-    chunk->len = 0;
-    chunk->cap = size;
+    *chunk = basic_arena_chunk{
+        .next = next, 
+        .data = (byte*)block,
+        .heap_size = 0,
+        .stack_size = 0,
+        .cap = size,
+    };
     return chunk;
 }
 
@@ -328,28 +338,33 @@ static inline void release_chunk(basic_arena_chunk* chunk)
     }
 }
 
+/*  chunk_alloc_heap anatomy:
+    ----------------------------------------------------------------------------
+    |     heap data    |   padding  |  new data  | unused |     stack data     |
+    ----------------------------------------------------------------------------
+    ^                  ^            ^                     ^                    ^
+    |                  |            |                     |                    |
+    data       data+heap_size      ret              data+cap-stack_size        data+cap
+*/
 template<typename T>
 maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t n = 1)
 {
-    byte* curr = chunk->data + chunk->len;
-    const ptrdiff_t alignment = alignof(T);
-    const ptrdiff_t extra = ptrdiff_t(curr) % alignment;
-    const ptrdiff_t padding = 
-        extra == 0 ? 0 : alignment - extra;
-
+    byte* curr = chunk->data + chunk->heap_size;
+    const int32_t alignment = alignof(T);
+    const int32_t extra = int64_t(curr) % alignment;
+    const int32_t padding = (extra == 0 ? 0 : alignment - extra);
+    const int32_t data_size = sizeof(T) * n;
+    const int32_t alloc_size = data_size + padding;
     
-    const ptrdiff_t size = sizeof(T) * n;
-    
-    const auto new_len = chunk->len + size;
-    if (new_len > chunk->cap) {
+    if ((chunk->heap_size + alloc_size + chunk->stack_size) > chunk->cap) {
         return none<T*>();
     }
     
     byte* ret = curr + padding;
-    assert(ptrdiff_t(ret)%alignment==0,
+    assert(int64_t(ret) % alignment==0,
         "[align] ret:%d, alignof:%d", ret, alignment);
-    memset(ret, 0, size);
-    chunk->len += size;
+    memset(ret, 0, sizeof(T) * n);
+    chunk->heap_size += alloc_size;
     return some<T*>(ret);
 }
 
@@ -440,7 +455,7 @@ struct basic_arena {
         basic_arena_chunk* tmp = NULL;
         basic_arena_chunk* curr = head;
         while (curr) {
-            curr->len = 0;
+            curr->heap_size = 0;
             tmp = curr;
             curr = curr->next;
             
@@ -456,37 +471,48 @@ struct basic_arena {
         }
     };
     
-    scratch_arena get_scratch(void);
+    scratch_arena scratch(void);
 };
 
+/*  chunk_alloc_stack anatomy:
+    -----------------------------------------------------------------------------
+    |     heap data    |   unused  | new data | padding |        stack data     |
+    -----------------------------------------------------------------------------
+    ^                  ^           ^                    ^                       ^
+    |                  |           |                    |                       |
+    data   data+heap_size          ret            data+cap-stack_size       data+cap
+*/
 template<typename T>
-maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t n = 1)
+maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t data_size, int32_t alignment)
 {
-    byte* curr = chunk->data - chunk->len;
-    const ptrdiff_t alignment = alignof(T);
-    const ptrdiff_t padding = ptrdiff_t(curr) % alignment;
-    const ptrdiff_t size = sizeof(T) * n;
-    const auto new_len = chunk->len + size;
-    if (new_len > chunk->cap) {
+    const int32_t padding = int64_t(chunk->data + chunk->stack_size) % alignment;
+    const int32_t alloc_size = data_size + padding;
+    if ((chunk->heap_size + chunk->stack_size + alloc_size) > chunk->cap) {
         return none<T*>();
     }
     
-    byte* ret = curr - padding;
-    assert(ptrdiff_t(ret)%alignment==0,
+    byte* ret = (chunk->data + chunk->cap) - (chunk->stack_size + alloc_size);
+    assert(int64_t(ret) % alignment==0,
         "[align] ret:%d, alignof:%d", ret, alignment);
-    memset(ret, 0, size);
-    chunk->len += size;
+    memset(ret, 0, data_size);
+    chunk->stack_size += alloc_size;
     return some<T*>(ret);
 }
 
 struct scratch_arena {
-    basic_arena_chunk stack;
+    basic_arena_chunk* chunk;
+    const int32_t old_stack_size;
     const arena_strategy strat;
+    
+    ~scratch_arena()
+    {
+        chunk->stack_size = old_stack_size;
+    }
     
     template<typename T>
     T* alloc(int n)
     {
-        maybe<T*> mret = chunk_alloc_stack<T>(&stack, n);
+        maybe<T*> mret = chunk_alloc_stack<T>(chunk, n);
         if (!mret.ok) {
             return basic_arena::oom(strat);
         }
@@ -494,15 +520,11 @@ struct scratch_arena {
     }
 };
 
-inline scratch_arena basic_arena::get_scratch(void)
+inline scratch_arena basic_arena::scratch(void)
 {
     return scratch_arena{
-        .stack = {
-            .next = NULL,
-            .data = head->data + head->cap,
-            .len = 0,
-            .cap = head->cap - head->len,
-        },
+        .chunk = head,
+        .old_stack_size = head->stack_size,
         .strat = strat,
     };
 }
