@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <array>
+#include <utility>
 
 template<typename T>
 requires std::is_invocable_v<T>
@@ -293,3 +294,158 @@ inline void string_append(string* s, const string* oth, arena* a)
     memcpy(&s->data[s->len], oth->data, oth->len);  
     s->len += oth->len;
 }
+
+#define KB 1024
+
+struct basic_arena_chunk {
+    basic_arena_chunk* next;
+    byte* data;
+    int32_t len;
+    int32_t cap;
+    
+    template<typename T>
+    maybe<T*> alloc(int n = 1)
+    {
+        byte* curr = data + len;
+        const ptrdiff_t alignment = alignof(T);
+        const ptrdiff_t extra = ptrdiff_t(curr) % alignment;
+        const ptrdiff_t padding = 
+            extra == 0 ? 0 : alignment - extra;
+
+        
+        const ptrdiff_t size = sizeof(T) * n;
+        
+        const auto new_len = len + size;
+        if (new_len > cap) {
+            return none<T*>();
+        }
+        
+        byte* ret = curr + padding;
+        assert(ptrdiff_t(ret)%alignment==0,
+            "[align] ret:%d, alignof:%d", ret, alignment);
+        memset(ret, 0, size);
+        len += size;
+        return some<T*>(ret);
+    }
+};
+
+static inline basic_arena_chunk* 
+make_chunk(
+    int32_t size, 
+    basic_arena_chunk* next
+)
+{
+    auto block_size = size + sizeof(basic_arena_chunk);
+    auto block = malloc(block_size);
+    assert(block, "malloc");
+    auto chunk = (basic_arena_chunk*)((byte*)(block)+size);
+    chunk->next = next; 
+    chunk->data = (byte*)block;
+    chunk->len = 0;
+    chunk->cap = size;
+    return chunk;
+}
+
+static inline void release_chunk(basic_arena_chunk* chunk) 
+{
+    if (chunk->data) {
+        free(chunk->data);
+    }
+}
+
+struct basic_arena {
+    basic_arena_chunk* head;
+    int32_t chunk_count;
+    const int32_t chunk_count_max;
+    arena_strategy strat;
+    
+    basic_arena
+    (
+        int32_t init_size = 4 * KB, 
+        int32_t max_chunks = 4,
+        arena_strategy strategy = ARENA_STRATEGY_PANIC
+    )
+        : head(make_chunk(init_size, NULL))
+        , chunk_count(1)
+        , chunk_count_max(max_chunks)
+        , strat(strategy) 
+    {
+        assert(max_chunks > 0, "non-positive max_chunks");
+    };
+
+    ~basic_arena()
+    {
+        basic_arena_chunk* prev = NULL;
+        basic_arena_chunk* curr = head;
+        while (curr) {
+            prev = curr;
+            curr = curr->next;
+            release_chunk(prev);
+        }
+    }
+    
+    template<typename T>
+    T* alloc(int n = 1)
+    {
+        assert(head, "arena not initialized");
+
+        // fast path
+        maybe<T*> mret = head->alloc<T>(n);
+        if (mret.ok) {
+            return mret.value;
+        }
+        
+        // traverse other chunks 
+        auto total_cap = head->cap;
+        for (auto chunk = head->next; chunk; chunk = chunk->next) {
+            maybe<T*> mret = head->alloc<T>(n);
+            if (mret.ok) {
+                return mret.value;
+            }
+            total_cap += chunk->cap;
+        }
+        
+        // check max chunk before try allocating new chunk
+        if (chunk_count == chunk_count_max) {
+            switch (strat) {
+            case ARENA_STRATEGY_PANIC:
+                panic("arena chunks exhausted");
+            break; case ARENA_STRATEGY_SILENT:
+                return NULL;
+            default:
+                panic("unknown strategy");
+            } 
+        }
+        
+        // allocate a new chunk and push it front
+        const auto min_size = sizeof(T) * n;
+        const auto new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
+        head = make_chunk(new_chunk_size, head);
+        mret = head->alloc<T>(n);
+        assert(mret.ok, "alloc failed! size: %d=(%d:n)*(%d:sizeof(T)), chunk->cap: %d",
+            min_size, n, sizeof(T), head->cap);
+        return mret.value;
+    }
+
+    void reset(bool shrink = false)
+    {
+        basic_arena_chunk* tmp = NULL;
+        basic_arena_chunk* curr = head;
+        while (curr) {
+            curr->len = 0;
+            tmp = curr;
+            curr = curr->next;
+            
+            if (!shrink) {
+                continue;
+            }
+            
+            if (tmp == head) {
+               tmp->next = NULL; 
+            } else {
+                release_chunk(tmp);
+            }
+        }
+    };
+};
+
