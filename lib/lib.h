@@ -363,9 +363,9 @@ maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t n = 1)
     byte* ret = curr + padding;
     assert(int64_t(ret) % alignment==0,
         "[align] ret:%d, alignof:%d", ret, alignment);
-    memset(ret, 0, sizeof(T) * n);
+    memset(ret, 0, data_size);
     chunk->heap_size += alloc_size;
-    return some<T*>(ret);
+    return some((T*)(void*)ret);
 }
 
 struct scratch_arena;
@@ -415,7 +415,7 @@ struct basic_arena {
     }
     
     template<typename T>
-    T* alloc(int n)
+    T* alloc(int32_t n)
     {
         assert(head, "arena not initialized");
 
@@ -437,13 +437,14 @@ struct basic_arena {
         
         // check max chunk before try allocating new chunk
         if (chunk_count == chunk_count_max) {
-            return oom(strat); 
+            return (T*)oom(strat); 
         }
         
         // allocate a new chunk and push it front
-        const auto min_size = sizeof(T) * n;
-        const auto new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
+        const int32_t min_size = sizeof(T) * n;
+        const int32_t new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
         head = make_chunk(new_chunk_size, head);
+        chunk_count++;
         mret = chunk_alloc_heap<T>(head, n);
         assert(mret.ok, "alloc failed! size: %d=(%d:n)*(%d:sizeof(T)), chunk->cap: %d",
             min_size, n, sizeof(T), head->cap);
@@ -496,7 +497,7 @@ maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t data_size, int32_t
         "[align] ret:%d, alignof:%d", ret, alignment);
     memset(ret, 0, data_size);
     chunk->stack_size += alloc_size;
-    return some<T*>(ret);
+    return some((T*)(void*)ret);
 }
 
 struct scratch_arena {

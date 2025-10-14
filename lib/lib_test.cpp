@@ -66,11 +66,25 @@ void test_slice_append(test_handler* t)
     }
 }
 
+void test_basic_arena(test_handler* t)
+{
+    const int32_t chunk_size = 4096;
+    basic_arena a = basic_arena(chunk_size, 2, ARENA_STRATEGY_SILENT);
+    
+    // allocate array to fill the block
+    const int32_t array_len = chunk_size / sizeof(int32_t);
+    int32_t* array = a.alloc<int32_t>(array_len); 
+    for (auto i = 0; i < array_len; i++) {
+        t->assert(array[i] == 0, "array[%d]=%d", i, array[i]);
+    }
+}
+
 int main(void)
 {
     test_main({
-        new_case( "defer", test_defer ),
-        new_case( "alloc", test_alloc ),
-        new_case( "test_slice_append", test_alloc ),
+        new_case("defer", test_defer),
+        new_case("alloc", test_alloc),
+        new_case("test_slice_append", test_alloc),
+        new_case("test_basic_arena", test_basic_arena),
     });
 }
