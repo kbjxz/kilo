@@ -302,31 +302,6 @@ struct basic_arena_chunk {
     byte* data;
     int32_t len;
     int32_t cap;
-    
-    template<typename T>
-    maybe<T*> alloc(int n = 1)
-    {
-        byte* curr = data + len;
-        const ptrdiff_t alignment = alignof(T);
-        const ptrdiff_t extra = ptrdiff_t(curr) % alignment;
-        const ptrdiff_t padding = 
-            extra == 0 ? 0 : alignment - extra;
-
-        
-        const ptrdiff_t size = sizeof(T) * n;
-        
-        const auto new_len = len + size;
-        if (new_len > cap) {
-            return none<T*>();
-        }
-        
-        byte* ret = curr + padding;
-        assert(ptrdiff_t(ret)%alignment==0,
-            "[align] ret:%d, alignof:%d", ret, alignment);
-        memset(ret, 0, size);
-        len += size;
-        return some<T*>(ret);
-    }
 };
 
 static inline basic_arena_chunk* 
@@ -353,11 +328,38 @@ static inline void release_chunk(basic_arena_chunk* chunk)
     }
 }
 
+template<typename T>
+maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t n = 1)
+{
+    byte* curr = chunk->data + chunk->len;
+    const ptrdiff_t alignment = alignof(T);
+    const ptrdiff_t extra = ptrdiff_t(curr) % alignment;
+    const ptrdiff_t padding = 
+        extra == 0 ? 0 : alignment - extra;
+
+    
+    const ptrdiff_t size = sizeof(T) * n;
+    
+    const auto new_len = chunk->len + size;
+    if (new_len > chunk->cap) {
+        return none<T*>();
+    }
+    
+    byte* ret = curr + padding;
+    assert(ptrdiff_t(ret)%alignment==0,
+        "[align] ret:%d, alignof:%d", ret, alignment);
+    memset(ret, 0, size);
+    chunk->len += size;
+    return some<T*>(ret);
+}
+
+struct scratch_arena;
+
 struct basic_arena {
     basic_arena_chunk* head;
     int32_t chunk_count;
     const int32_t chunk_count_max;
-    arena_strategy strat;
+    const arena_strategy strat;
     
     basic_arena
     (
@@ -384,13 +386,26 @@ struct basic_arena {
         }
     }
     
+    static void* oom(arena_strategy strat)
+    {
+        switch (strat) {
+        case ARENA_STRATEGY_PANIC:
+            panic("arena chunks exhausted");
+        break; case ARENA_STRATEGY_SILENT:
+            return NULL;
+        default:
+            panic("unknown strategy");
+        }
+        return NULL;
+    }
+    
     template<typename T>
-    T* alloc(int n = 1)
+    T* alloc(int n)
     {
         assert(head, "arena not initialized");
 
         // fast path
-        maybe<T*> mret = head->alloc<T>(n);
+        maybe<T*> mret = chunk_alloc_heap<T>(head, n);
         if (mret.ok) {
             return mret.value;
         }
@@ -398,7 +413,7 @@ struct basic_arena {
         // traverse other chunks 
         auto total_cap = head->cap;
         for (auto chunk = head->next; chunk; chunk = chunk->next) {
-            maybe<T*> mret = head->alloc<T>(n);
+            maybe<T*> mret = chunk_alloc_heap<T>(chunk, n);
             if (mret.ok) {
                 return mret.value;
             }
@@ -407,21 +422,14 @@ struct basic_arena {
         
         // check max chunk before try allocating new chunk
         if (chunk_count == chunk_count_max) {
-            switch (strat) {
-            case ARENA_STRATEGY_PANIC:
-                panic("arena chunks exhausted");
-            break; case ARENA_STRATEGY_SILENT:
-                return NULL;
-            default:
-                panic("unknown strategy");
-            } 
+            return oom(strat); 
         }
         
         // allocate a new chunk and push it front
         const auto min_size = sizeof(T) * n;
         const auto new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
         head = make_chunk(new_chunk_size, head);
-        mret = head->alloc<T>(n);
+        mret = chunk_alloc_heap<T>(head, n);
         assert(mret.ok, "alloc failed! size: %d=(%d:n)*(%d:sizeof(T)), chunk->cap: %d",
             min_size, n, sizeof(T), head->cap);
         return mret.value;
@@ -447,5 +455,54 @@ struct basic_arena {
             }
         }
     };
+    
+    scratch_arena get_scratch(void);
 };
 
+template<typename T>
+maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t n = 1)
+{
+    byte* curr = chunk->data - chunk->len;
+    const ptrdiff_t alignment = alignof(T);
+    const ptrdiff_t padding = ptrdiff_t(curr) % alignment;
+    const ptrdiff_t size = sizeof(T) * n;
+    const auto new_len = chunk->len + size;
+    if (new_len > chunk->cap) {
+        return none<T*>();
+    }
+    
+    byte* ret = curr - padding;
+    assert(ptrdiff_t(ret)%alignment==0,
+        "[align] ret:%d, alignof:%d", ret, alignment);
+    memset(ret, 0, size);
+    chunk->len += size;
+    return some<T*>(ret);
+}
+
+struct scratch_arena {
+    basic_arena_chunk stack;
+    const arena_strategy strat;
+    
+    template<typename T>
+    T* alloc(int n)
+    {
+        maybe<T*> mret = chunk_alloc_stack<T>(&stack, n);
+        if (!mret.ok) {
+            return basic_arena::oom(strat);
+        }
+        return mret.value;
+    }
+};
+
+inline scratch_arena basic_arena::get_scratch(void)
+{
+    return scratch_arena{
+        .stack = {
+            .next = NULL,
+            .data = head->data + head->cap,
+            .len = 0,
+            .cap = head->cap - head->len,
+        },
+        .strat = strat,
+    };
+}
