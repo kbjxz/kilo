@@ -1,6 +1,7 @@
 #include <initializer_list>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stddef.h>
 
 struct test_handler;
 
@@ -31,7 +32,7 @@ struct test_handler {
     bool is_pass;
 
     void* get_args();
-    void subtest(const test_case* tc);
+    void subtest(const char* name, test_func f, void* args = NULL);
     void logf(const char* fmt, ...);
     void assert(bool cond, const char* fmt, ...);
 };
@@ -43,7 +44,7 @@ bool test_run(test_handler* h);
 
 #include <stdio.h>
 
-void test_main(std::initializer_list<test_case> tests)
+inline void test_main(std::initializer_list<test_case> tests)
 {
     auto is_all_pass = true;
     for (auto beg = tests.begin(); beg != tests.end(); beg++) {
@@ -58,7 +59,7 @@ void test_main(std::initializer_list<test_case> tests)
     }
 }
 
-void test_setup(test_handler* h, const test_case* tc, test_handler* parent)
+inline void test_setup(test_handler* h, const test_case* tc, test_handler* parent)
 {
     h->is_pass = true;
     h->tc = *tc;
@@ -68,7 +69,7 @@ void test_setup(test_handler* h, const test_case* tc, test_handler* parent)
     }
 }
 
-bool test_run(test_handler* h)
+inline bool test_run(test_handler* h)
 {
     printf("=== RUN     ");
     test_print_name(h);
@@ -87,7 +88,7 @@ bool test_run(test_handler* h)
     return h->is_pass;
 }
 
-void test_print_name(test_handler* h) {
+inline void test_print_name(test_handler* h) {
     if (h->parent) {
         test_print_name(h->parent);
         printf("/%s", h->tc.name);
@@ -96,20 +97,24 @@ void test_print_name(test_handler* h) {
     }
 }
 
-void* test_handler::get_args() 
+inline void* test_handler::get_args() 
 {
     return this->tc.args;
 }
 
-void test_handler::subtest(const test_case* tc)
+inline void test_handler::subtest(
+    const char* name,
+    test_func f,
+    void* args)
 {
     test_handler h;
-    test_setup(&h, tc, this);
+    test_case tc = new_case(name, f, args);
+    test_setup(&h, &tc, this);
     bool is_pass = test_run(&h);
     this->is_pass = (this->is_pass && is_pass);
 }
 
-void test_handler::logf(const char* fmt, ...)
+inline void test_handler::logf(const char* fmt, ...)
 {
     printf("\t%s:%d: s", __FILE__, __LINE__);
     va_list args;
@@ -119,7 +124,7 @@ void test_handler::logf(const char* fmt, ...)
     printf("\n");
 }
 
-void test_handler::assert(bool cond, const char* fmt, ...)
+inline void test_handler::assert(bool cond, const char* fmt, ...)
 {
     if (cond) {
         return;
