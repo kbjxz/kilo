@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <array>
-#include <utility>
 
 template<typename T>
 requires std::is_invocable_v<T>
@@ -347,13 +346,11 @@ static inline void release_chunk(basic_arena_chunk* chunk)
     data       data+heap_size      ret              data+cap-stack_size        data+cap
 */
 template<typename T>
-maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t n = 1)
+maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t data_size, int32_t alignment)
 {
     byte* curr = chunk->data + chunk->heap_size;
-    const int32_t alignment = alignof(T);
     const int32_t extra = int64_t(curr) % alignment;
     const int32_t padding = (extra == 0 ? 0 : alignment - extra);
-    const int32_t data_size = sizeof(T) * n;
     const int32_t alloc_size = data_size + padding;
     
     if ((chunk->heap_size + alloc_size + chunk->stack_size) > chunk->cap) {
@@ -417,10 +414,12 @@ struct basic_arena {
     template<typename T>
     T* alloc(int32_t n)
     {
+        static const int32_t alignment = alignof(T);
+        const int32_t data_size = sizeof(T) * n;
         assert(head, "arena not initialized");
 
         // fast path
-        maybe<T*> mret = chunk_alloc_heap<T>(head, n);
+        maybe<T*> mret = chunk_alloc_heap<T>(head, data_size, alignment);
         if (mret.ok) {
             return mret.value;
         }
@@ -428,7 +427,7 @@ struct basic_arena {
         // traverse other chunks 
         auto total_cap = head->cap;
         for (auto chunk = head->next; chunk; chunk = chunk->next) {
-            maybe<T*> mret = chunk_alloc_heap<T>(chunk, n);
+            maybe<T*> mret = chunk_alloc_heap<T>(chunk, data_size, alignment);
             if (mret.ok) {
                 return mret.value;
             }
@@ -445,7 +444,7 @@ struct basic_arena {
         const int32_t new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
         head = make_chunk(new_chunk_size, head);
         chunk_count++;
-        mret = chunk_alloc_heap<T>(head, n);
+        mret = chunk_alloc_heap<T>(head, data_size, alignment);
         assert(mret.ok, "alloc failed! size: %d=(%d:n)*(%d:sizeof(T)), chunk->cap: %d",
             min_size, n, sizeof(T), head->cap);
         return mret.value;
@@ -513,9 +512,11 @@ struct scratch_arena {
     template<typename T>
     T* alloc(int n)
     {
-        maybe<T*> mret = chunk_alloc_stack<T>(chunk, n);
+        static const int32_t alignment = alignof(T);
+        const int32_t data_size = sizeof(T) * n; 
+        maybe<T*> mret = chunk_alloc_stack<T>(chunk, data_size, alignment);
         if (!mret.ok) {
-            return basic_arena::oom(strat);
+            return (T*)basic_arena::oom(strat);
         }
         return mret.value;
     }
