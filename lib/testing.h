@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <string.h>
 #include <initializer_list>
 #include <stdarg.h>
 #include <stdint.h>
@@ -41,6 +43,7 @@ void test_main(std::initializer_list<test_case> tests);
 void test_setup(test_handler* h, const test_case* tc, test_handler* parent);
 void test_print_name(test_handler* h);
 bool test_run(test_handler* h);
+void tprint(const test_handler*h, const char* fmt, ...);
 
 #include <stdio.h>
 
@@ -61,6 +64,7 @@ inline void test_main(std::initializer_list<test_case> tests)
 
 inline void test_setup(test_handler* h, const test_case* tc, test_handler* parent)
 {
+    *h = test_handler{};
     h->is_pass = true;
     h->tc = *tc;
     h->parent = parent;
@@ -69,18 +73,40 @@ inline void test_setup(test_handler* h, const test_case* tc, test_handler* paren
     }
 }
 
+inline void tprint(const test_handler* h, const char* fmt, ...)
+{
+    // print indents
+    switch (h->indents) {
+        case 0: 
+        break; case 1: printf("\t");
+        break; case 2: printf("\t\t");
+        break; case 3: printf("\t\t\t");
+        break; default:
+            char* buf = (char*)malloc(h->indents+1);
+            memset(buf, '\t', h->indents);
+            buf[h->indents] = '\0'; 
+            printf("%s", buf);
+    }
+    
+    // print data 
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+
 inline bool test_run(test_handler* h)
 {
-    printf("=== RUN     ");
+    tprint(h, "=== RUN     ");
     test_print_name(h);
     printf("\n");
 
     h->tc.f(h);
 
     if (!h->is_pass) {
-        printf("--- FAIL:   ");
+        tprint(h, "--- FAIL:   ");
     } else {
-        printf("--- PASS:   ");
+        tprint(h, "--- PASS:   ");
     }
     test_print_name(h);
     printf("\n");
@@ -116,7 +142,7 @@ inline void test_handler::subtest(
 
 inline void test_handler::logf(const char* fmt, ...)
 {
-    printf("\t%s:%d: s", __FILE__, __LINE__);
+    tprint(this, "%s:%d: ", __FILE__, __LINE__);
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);
@@ -132,7 +158,8 @@ inline void test_handler::assert(bool cond, const char* fmt, ...)
         this->is_pass = false;
     }
 
-    printf("\t%s:%d: s", __FILE__, __LINE__);
+    tprint(this, "%s:%d: ", __FILE__, __LINE__);
+
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);
