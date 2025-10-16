@@ -1,3 +1,4 @@
+#include <cmath>
 #include <concepts>
 #include <cstdint>
 #include <stdio.h>
@@ -191,109 +192,6 @@ T* arena_alloc(arena* a, int n = 1)
     return (T*)(ret);
 }
 
-template <typename T>
-struct slice {
-    T* data;
-    size_t len;
-    size_t cap;
-
-    T& operator[](size_t i) 
-    {
-        assert(i < this->len, "out of bound! len:%d, i:%d", this->len, i);
-        return this->data[i];
-    }
-};
-
-template <typename T>
-void slice_reserve(slice<T>* s, size_t new_cap, arena* a)
-{
-    if (s->cap >= new_cap) {
-        return;
-    }
-    T* new_data = arena_alloc<T>(a, new_cap);
-    if (s->data) {
-        memcpy(new_data, s->data, s->len);
-    }
-    s->data = new_data;
-    s->cap = new_cap;
-}
-
-template <typename T>
-void slice_append(slice<T>* s, T v, arena* a)
-{
-    if (s->len < s->cap) {
-        s->data[s->len] = v;
-        s->len++;
-    }
-    
-    static const size_t default_cap = 4;
-    size_t new_cap = s->cap ? s->cap * 2 : default_cap;
-
-    T* new_data = arena_alloc<T>(a, new_cap);
-    if (s->data) {
-        memcpy(new_data, s->data, s->len);
-    }
-
-    s->data = new_data;
-    s->len += 1;
-    s->cap = new_cap;
-}
-
-template <typename T>
-slice<T> slice_sub(slice<T> s, int beg, int end)
-{
-    assert(0 <= beg && beg <= end && end <= s.len, 
-        "index out of bound! in:[%d, %d), valid:[%d, %d)", 
-        beg, end, 0, s.len);
-    return slice<T>{
-        .data = s.data[beg],
-        .len  = end - beg,
-        .cap  = end - beg,
-    };
-}
-
-using string = slice<char>;
-
-template <std::size_t N>
-const string string_from(const std::array<char, N>& a)
-{
-    return string{
-        .data = (char*)((void*)(a.data())),
-        .len  = a.size() - 1,
-        .cap  = a.size() - 1,
-    };
-}
-
-template <std::size_t N>
-const string string_from(const char (&a)[N])
-{
-    return string_from(std::to_array(a));
-}
-
-inline void string_reserve(string* s, size_t new_cap, arena* a)
-{
-    slice_reserve(s, new_cap, a);
-}
-
-inline void string_append(string* s, const char* v, size_t n, arena* a)
-{
-    slice_reserve(s, s->len + n, a);
-    memcpy(&s->data[s->len], v, n);
-    s->len += n;
-}
-
-inline void string_append(string* s, char c, arena* a)
-{
-    slice_append(s, c, a);
-}
-
-inline void string_append(string* s, const string* oth, arena* a)
-{
-    slice_reserve(s, s->len + oth->len, a);
-    memcpy(&s->data[s->len], oth->data, oth->len);  
-    s->len += oth->len;
-}
-
 #define KB 1024
 
 /* 
@@ -365,9 +263,18 @@ maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t data_size, int32_t 
     return some((T*)(void*)ret);
 }
 
+template <typename A>
+struct base_arena {
+    template<typename T>
+    T* alloc(int32_t n)
+    {
+        return (A*)(this)->alloc<T>(n);
+    }
+};
+
 struct scratch_arena;
 
-struct basic_arena {
+struct basic_arena : public base_arena<basic_arena> {
     basic_arena_chunk* head;
     int32_t chunk_count;
     const int32_t chunk_count_max;
@@ -499,7 +406,7 @@ maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t data_size, int32_t
     return some((T*)(void*)ret);
 }
 
-struct scratch_arena {
+struct scratch_arena : public base_arena<scratch_arena> {
     basic_arena_chunk* chunk;
     const int32_t old_stack_size;
     const arena_strategy strat;
@@ -529,4 +436,234 @@ inline scratch_arena basic_arena::scratch(void)
         .old_stack_size = head->stack_size,
         .strat = strat,
     };
+}
+
+template <typename T>
+struct slice {
+    T* data;
+    size_t len;
+    size_t cap;
+
+    T* operator[](size_t i) 
+    {
+        assert(i < this->len, "out of bound! len:%d, i:%d", this->len, i);
+        return &this->data[i];
+    }
+};
+
+template <typename T>
+void slice_reserve(slice<T>* s, size_t new_cap, arena* a)
+{
+    if (s->cap >= new_cap) {
+        return;
+    }
+    T* new_data = arena_alloc<T>(a, new_cap);
+    if (s->data) {
+        memcpy(new_data, s->data, s->len);
+    }
+    s->data = new_data;
+    s->cap = new_cap;
+}
+
+template <typename T, typename A>
+void slice_reserve(slice<T>* s, size_t new_cap, base_arena<A>* a)
+{
+    if (s->cap >= new_cap) {
+        return;
+    }
+    T* new_data = a->template alloc<T>(new_cap);
+    if (s->data) {
+        memcpy(new_data, s->data, s->len);
+    }
+    s->data = new_data;
+    s->cap = new_cap;
+}
+
+template <typename T>
+void slice_append(slice<T>* s, T v, arena* a)
+{
+    if (s->len < s->cap) {
+        s->data[s->len] = v;
+        s->len++;
+    }
+    
+    static const size_t default_cap = 4;
+    size_t new_cap = s->cap ? s->cap * 2 : default_cap;
+
+    T* new_data = arena_alloc<T>(a, new_cap);
+    if (s->data) {
+        memcpy(new_data, s->data, s->len);
+    }
+
+    s->data = new_data;
+    s->len += 1;
+    s->cap = new_cap;
+}
+
+template <typename T, typename A>
+void slice_append(slice<T>* s, T v, base_arena<A>* a)
+{
+    if (s->len < s->cap) {
+        s->data[s->len] = v;
+        s->len++;
+    }
+    
+    static const size_t default_cap = 4;
+    size_t new_cap = s->cap ? s->cap * 2 : default_cap;
+
+    T* new_data = a->template alloc<T>(a, new_cap);
+    if (s->data) {
+        memcpy(new_data, s->data, s->len);
+    }
+
+    s->data = new_data;
+    s->len += 1;
+    s->cap = new_cap;
+}
+
+template <typename T>
+slice<T> slice_sub(slice<T> s, int beg, int end)
+{
+    assert(0 <= beg && beg <= end && end <= s.len, 
+        "index out of bound! in:[%d, %d), valid:[%d, %d)", 
+        beg, end, 0, s.len);
+    return slice<T>{
+        .data = s.data[beg],
+        .len  = end - beg,
+        .cap  = end - beg,
+    };
+}
+
+using string = slice<char>;
+
+template <std::size_t N>
+const string string_from(const std::array<char, N>& a)
+{
+    return string{
+        .data = (char*)((void*)(a.data())),
+        .len  = a.size() - 1,
+        .cap  = a.size() - 1,
+    };
+}
+
+template <std::size_t N>
+const string string_from(const char (&a)[N])
+{
+    return string_from(std::to_array(a));
+}
+
+inline void string_reserve(string* s, size_t new_cap, arena* a)
+{
+    slice_reserve(s, new_cap, a);
+}
+
+inline void string_append(string* s, const char* v, size_t n, arena* a)
+{
+    slice_reserve(s, s->len + n, a);
+    memcpy(&s->data[s->len], v, n);
+    s->len += n;
+}
+
+inline void string_append(string* s, char c, arena* a)
+{
+    slice_append(s, c, a);
+}
+
+inline void string_append(string* s, const string* oth, arena* a)
+{
+    slice_reserve(s, s->len + oth->len, a);
+    memcpy(&s->data[s->len], oth->data, oth->len);  
+    s->len += oth->len;
+}
+
+
+template <typename K, typename V, typename A>
+struct hashmap {
+    using equal_func = bool(*)(const K*, const K*);
+    using hash_func = size_t(*)(const K);
+    
+    template <typename E>
+    using bucket = std::array<E, 4>;
+    
+    
+    static constexpr int load_factor = 6; // => 0.6
+    
+    int32_t len;
+    int32_t cap;
+    hash_func hash;
+    equal_func equal;
+    base_arena<A>* arena;
+    slice<maybe<K>> keys;
+    slice<V> vals;
+    
+    void put(const K* key, const V* val)
+    {
+        if (len * 10 / cap > load_factor) {
+            // realloc
+        }
+
+        int32_t h = hash(key);
+        for (auto i = h;; i++) {
+            maybe<K>* mkey = keys[i%cap];
+            if (!mkey->ok) {
+                mkey = some(*key);
+                vals[i%cap]->at(h) = *val;
+                return;
+            } else if (equal(key, &mkey->value)) {
+                vals[i%cap]->at(h) = *val;
+                return;
+            }
+        }
+    }
+
+    maybe<V*> get(const K* key)
+    {
+        int32_t h = hash(key);
+        for (auto i = h; i != h+cap; i++) {
+            maybe<K>* mkey = keys[i%cap];
+            if (mkey->ok && equal(key, &mkey->value)) {
+               return some(vals[i%cap]);
+            }
+        }
+        return none<V*>();
+    }
+    maybe<V*> operator[](const K* key)
+    {
+        return get(key);
+    }
+    
+    struct iter {
+        int32_t pos;
+        hashmap* hm;
+        inline void operator++()
+        {
+            pos++;
+        }
+    };
+
+    iter beg();
+    iter end();
+};
+
+template <typename K, typename V, typename A>
+inline static void make(
+    hashmap<K, V, A>* hm,
+    base_arena<A>* arena,
+    typename hashmap<K, V, A>::hash_func hash,
+    typename hashmap<K, V, A>::equal_func equal,
+    int32_t cap = 8
+)
+{
+    const int32_t actual_cap = cap * 10 / hm->load_factor;
+    hm->len = 0;
+    hm->cap = actual_cap;
+    hm->hash = hash;
+    hm->equal = equal;
+    hm->arena = arena;
+
+    hm->keys = {};
+    slice_reserve(&hm->keys, actual_cap, arena);
+
+    hm->vals = {};
+    slice_reserve(&hm->vals, actual_cap, arena);
 }

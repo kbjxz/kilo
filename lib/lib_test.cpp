@@ -62,7 +62,7 @@ void test_slice_append(test_handler* t)
         return;
     }
     for (auto i = 0; i < count; i++) {
-        t->assert(s[i] == exp[i], "[%d] exp: %d, got: %d", s[i], exp[i]);
+        t->assert(*s[i] == exp[i], "[%d] exp: %d, got: %d", s[i], exp[i]);
     }
 }
 
