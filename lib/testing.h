@@ -4,6 +4,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <type_traits>
 
 struct test_handler;
 
@@ -27,25 +29,103 @@ inline test_case new_case(
     };
 }
 
+using __file_t = std::decay_t<decltype(__FILE__)>;
+using __line_t = std::decay_t<decltype(__LINE__)>;
+
 struct test_handler {
     test_handler* parent;
     test_case tc; 
     int8_t indents;
+    void* args;
     bool is_pass;
-
-    void* get_args();
-    void subtest(const char* name, test_func f, void* args = NULL);
-    void logf(const char* fmt, ...);
-    void assert(bool cond, const char* fmt, ...);
 };
 
 void test_main(std::initializer_list<test_case> tests);
 void test_setup(test_handler* h, const test_case* tc, test_handler* parent);
 void test_print_name(test_handler* h);
 bool test_run(test_handler* h);
-void tprint(const test_handler*h, const char* fmt, ...);
+void __print_with_tab(const test_handler*h, const char* fmt, ...);
 
-#include <stdio.h>
+template <typename T>
+T* test_get_args(test_handler* t)
+{
+    return (T*)t->args;
+}
+
+inline void test_subtest(
+    test_handler* t, 
+    const char* name, 
+    test_func f, 
+    void* args = NULL
+)
+{
+    test_handler subt;
+    test_case tc = new_case(name, f, args);
+    test_setup(&subt, &tc, t);
+    bool is_pass = test_run(&subt);
+    t->is_pass = (t->is_pass && is_pass);
+}
+
+
+inline void __print_with_tab(const test_handler* h, const char* fmt, ...)
+{
+    // print indents
+    switch (h->indents) {
+        case 0: 
+        break; case 1: printf("\t");
+        break; case 2: printf("\t\t");
+        break; case 3: printf("\t\t\t");
+        break; default:
+            char* buf = (char*)malloc(h->indents+1);
+            memset(buf, '\t', h->indents);
+            buf[h->indents] = '\0'; 
+            printf("%s", buf);
+    }
+    
+    // print data 
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+
+#define test_logf(h, fmt, ...) (__logf(h, __FILE__, __LINE__, fmt, ##__VA_ARGS__))
+inline void __logf(test_handler* h, __file_t file, __line_t line, const char* fmt, ...)
+{
+    __print_with_tab(h, "%s:%d: ", file, line);
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+}
+
+#define test_assert(h, cond, fmt, ...) \
+__assert(h, __FILE__, __LINE__, cond, fmt, ##__VA_ARGS__)
+inline void __assert(
+    test_handler* t, 
+    __file_t file, 
+    __line_t line, 
+    bool cond, 
+    const char* fmt, ...
+)
+{
+    if (cond) {
+        return;
+    } else {
+        t->is_pass = false;
+    }
+
+    __print_with_tab(t, "%s:%d: ", file, line);
+
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+}
+
+
 
 inline void test_main(std::initializer_list<test_case> tests)
 {
@@ -73,40 +153,19 @@ inline void test_setup(test_handler* h, const test_case* tc, test_handler* paren
     }
 }
 
-inline void tprint(const test_handler* h, const char* fmt, ...)
-{
-    // print indents
-    switch (h->indents) {
-        case 0: 
-        break; case 1: printf("\t");
-        break; case 2: printf("\t\t");
-        break; case 3: printf("\t\t\t");
-        break; default:
-            char* buf = (char*)malloc(h->indents+1);
-            memset(buf, '\t', h->indents);
-            buf[h->indents] = '\0'; 
-            printf("%s", buf);
-    }
-    
-    // print data 
-    va_list args;
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-}
 
 inline bool test_run(test_handler* h)
 {
-    tprint(h, "=== RUN     ");
+    __print_with_tab(h, "=== RUN     ");
     test_print_name(h);
     printf("\n");
 
     h->tc.f(h);
 
     if (!h->is_pass) {
-        tprint(h, "--- FAIL:   ");
+        __print_with_tab(h, "--- FAIL:   ");
     } else {
-        tprint(h, "--- PASS:   ");
+        __print_with_tab(h, "--- PASS:   ");
     }
     test_print_name(h);
     printf("\n");
@@ -121,48 +180,4 @@ inline void test_print_name(test_handler* h) {
     } else {
         printf("%s", h->tc.name);
     }
-}
-
-inline void* test_handler::get_args() 
-{
-    return this->tc.args;
-}
-
-inline void test_handler::subtest(
-    const char* name,
-    test_func f,
-    void* args)
-{
-    test_handler h;
-    test_case tc = new_case(name, f, args);
-    test_setup(&h, &tc, this);
-    bool is_pass = test_run(&h);
-    this->is_pass = (this->is_pass && is_pass);
-}
-
-inline void test_handler::logf(const char* fmt, ...)
-{
-    tprint(this, "%s:%d: ", __FILE__, __LINE__);
-    va_list args;
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-    printf("\n");
-}
-
-inline void test_handler::assert(bool cond, const char* fmt, ...)
-{
-    if (cond) {
-        return;
-    } else {
-        this->is_pass = false;
-    }
-
-    tprint(this, "%s:%d: ", __FILE__, __LINE__);
-
-    va_list args;
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-    printf("\n");
 }
