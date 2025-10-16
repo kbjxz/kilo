@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <array>
+#include <tuple>
 
 template<typename T>
 requires std::is_invocable_v<T>
@@ -51,6 +52,15 @@ template <typename T>
 struct maybe {
     T value;
     bool ok;
+    
+    operator bool()
+    {
+        return ok; 
+    }
+    T operator() ()
+    {
+        return value;
+    }
 };
 
 template <typename T>
@@ -69,6 +79,11 @@ template <typename T, typename Err = error>
 struct result {
     maybe<Err> merr;
     T value;
+    
+    operator bool ()
+    {
+        return !merr;
+    }
 };
 
 template <typename T, typename Err = error>
@@ -321,64 +336,68 @@ struct basic_arena : public base_arena<basic_arena> {
     template<typename T>
     T* alloc(int32_t n)
     {
-        static const int32_t alignment = alignof(T);
-        const int32_t data_size = sizeof(T) * n;
-        assert(head, "arena not initialized");
-
-        // fast path
-        maybe<T*> mret = chunk_alloc_heap<T>(head, data_size, alignment);
-        if (mret.ok) {
-            return mret.value;
-        }
-        
-        // traverse other chunks 
-        auto total_cap = head->cap;
-        for (auto chunk = head->next; chunk; chunk = chunk->next) {
-            maybe<T*> mret = chunk_alloc_heap<T>(chunk, data_size, alignment);
-            if (mret.ok) {
-                return mret.value;
-            }
-            total_cap += chunk->cap;
-        }
-        
-        // check max chunk before try allocating new chunk
-        if (chunk_count == chunk_count_max) {
-            return (T*)oom(strat); 
-        }
-        
-        // allocate a new chunk and push it front
-        const int32_t min_size = sizeof(T) * n;
-        const int32_t new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
-        head = make_chunk(new_chunk_size, head);
-        chunk_count++;
-        mret = chunk_alloc_heap<T>(head, data_size, alignment);
-        assert(mret.ok, "alloc failed! size: %d=(%d:n)*(%d:sizeof(T)), chunk->cap: %d",
-            min_size, n, sizeof(T), head->cap);
-        return mret.value;
+        return basic_arena_alloc<T>(this, n);
     }
+};
 
-    void reset(bool shrink = false)
-    {
-        basic_arena_chunk* tmp = NULL;
-        basic_arena_chunk* curr = head;
-        while (curr) {
-            curr->heap_size = 0;
-            tmp = curr;
-            curr = curr->next;
-            
-            if (!shrink) {
-                continue;
-            }
-            
-            if (tmp == head) {
-               tmp->next = NULL; 
-            } else {
-                release_chunk(tmp);
-            }
-        }
-    };
+template<typename T>
+T* basic_arena_alloc(basic_arena* a, int32_t n)
+{
+    static const int32_t alignment = alignof(T);
+    const int32_t data_size = sizeof(T) * n;
+    assert(a->head, "arena not initialized");
+
+    // fast path
+    maybe<T*> mret = chunk_alloc_heap<T>(a->head, data_size, alignment);
+    if (mret) {
+        return mret();
+    }
     
-    scratch_arena scratch(void);
+    // traverse other chunks 
+    auto total_cap = a->head->cap;
+    for (auto chunk = a->head->next; chunk; chunk = chunk->next) {
+        maybe<T*> mret = chunk_alloc_heap<T>(chunk, data_size, alignment);
+        if (mret) {
+            return mret();
+        }
+        total_cap += chunk->cap;
+    }
+    
+    // check max chunk before try allocating new chunk
+    if (a->chunk_count == a->chunk_count_max) {
+        return (T*)a->oom(a->strat); 
+    }
+    
+    // allocate a new chunk and push it front
+    const int32_t min_size = sizeof(T) * n;
+    const int32_t new_chunk_size = min_size < total_cap  ? total_cap : min_size * 2;
+    a->head = make_chunk(new_chunk_size, a->head);
+    a->chunk_count++;
+    mret = chunk_alloc_heap<T>(a->head, data_size, alignment);
+    assert(bool(mret), "alloc failed! size: %d=(%d:n)*(%d:sizeof(T)), chunk->cap: %d",
+        min_size, n, sizeof(T), a->head->cap);
+    return mret();
+}
+
+inline void basic_arena_reset(basic_arena* a, bool shrink = false)
+{
+    basic_arena_chunk* tmp = NULL;
+    basic_arena_chunk* curr = a->head;
+    while (curr) {
+        curr->heap_size = 0;
+        tmp = curr;
+        curr = curr->next;
+        
+        if (!shrink) {
+            continue;
+        }
+        
+        if (tmp == a->head) {
+            tmp->next = NULL; 
+        } else {
+            release_chunk(tmp);
+        }
+    }
 };
 
 /*  chunk_alloc_stack anatomy:
@@ -406,6 +425,9 @@ maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t data_size, int32_t
     return some((T*)(void*)ret);
 }
 
+template<typename T>
+T* scratch_arena_alloc(scratch_arena* a, int32_t n);
+
 struct scratch_arena : public base_arena<scratch_arena> {
     basic_arena_chunk* chunk;
     const int32_t old_stack_size;
@@ -417,24 +439,30 @@ struct scratch_arena : public base_arena<scratch_arena> {
     }
     
     template<typename T>
-    T* alloc(int n)
+    T* alloc(int32_t n)
     {
-        static const int32_t alignment = alignof(T);
-        const int32_t data_size = sizeof(T) * n; 
-        maybe<T*> mret = chunk_alloc_stack<T>(chunk, data_size, alignment);
-        if (!mret.ok) {
-            return (T*)basic_arena::oom(strat);
-        }
-        return mret.value;
+        return scratch_arena_alloc<T>(this, n);
     }
 };
 
-inline scratch_arena basic_arena::scratch(void)
+template<typename T>
+T* scratch_arena_alloc(scratch_arena* a, int32_t n)
+{
+    static const int32_t alignment = alignof(T);
+    const int32_t data_size = sizeof(T) * n; 
+    maybe<T*> mret = chunk_alloc_stack<T>(a->chunk, data_size, alignment);
+    if (!mret) {
+        return (T*)basic_arena::oom(a->strat);
+    }
+    return mret();
+}
+
+inline scratch_arena basic_arena_scratch(basic_arena* a)
 {
     return scratch_arena{
-        .chunk = head,
-        .old_stack_size = head->stack_size,
-        .strat = strat,
+        .chunk = a->head,
+        .old_stack_size = a->head->stack_size,
+        .strat = a->strat,
     };
 }
 
@@ -444,10 +472,10 @@ struct slice {
     size_t len;
     size_t cap;
 
-    T* operator[](size_t i) 
+    T& operator[](size_t i) 
     {
         assert(i < this->len, "out of bound! len:%d, i:%d", this->len, i);
-        return &this->data[i];
+        return this->data[i];
     }
 };
 
@@ -596,57 +624,20 @@ struct hashmap {
     slice<maybe<K>> keys;
     slice<V> vals;
     
-    void put(const K* key, const V* val)
-    {
-        if (len * 10 / cap > load_factor) {
-            // realloc
-        }
+    maybe<V*> operator[](const K* key);
+};
 
-        int32_t h = hash(key);
-        for (auto i = h;; i++) {
-            maybe<K>* mkey = keys[i%cap];
-            if (!mkey->ok) {
-                mkey = some(*key);
-                vals[i%cap]->at(h) = *val;
-                return;
-            } else if (equal(key, &mkey->value)) {
-                vals[i%cap]->at(h) = *val;
-                return;
-            }
-        }
-    }
 
-    maybe<V*> get(const K* key)
-    {
-        int32_t h = hash(key);
-        for (auto i = h; i != h+cap; i++) {
-            maybe<K>* mkey = keys[i%cap];
-            if (mkey->ok && equal(key, &mkey->value)) {
-               return some(vals[i%cap]);
-            }
-        }
-        return none<V*>();
-    }
-    maybe<V*> operator[](const K* key)
-    {
-        return get(key);
-    }
-    
-    struct iter {
-        int32_t pos;
-        hashmap* hm;
-        inline void operator++()
-        {
-            pos++;
-        }
-    };
-
-    iter beg();
-    iter end();
+template <typename K, typename V, typename _>
+struct hashmap_iter {
+    int32_t pos;
+    hashmap<K, V, _>* hm;
+    void operator++();
+    void operator*(); 
 };
 
 template <typename K, typename V, typename A>
-inline static void make(
+void make_hashmap(
     hashmap<K, V, A>* hm,
     base_arena<A>* arena,
     typename hashmap<K, V, A>::hash_func hash,
@@ -666,4 +657,60 @@ inline static void make(
 
     hm->vals = {};
     slice_reserve(&hm->vals, actual_cap, arena);
+}
+
+template <typename K, typename V, typename A>
+void hashmap_put(hashmap<K, V, A>* hm, const K* key, const V* val)
+{
+    if (hm->len * 10 / hm->cap > hm->load_factor) {
+        // realloc
+    }
+
+    int32_t h = hash(key);
+    for (auto i = h;; i++) {
+        maybe<K>* mkey = hm->keys[i%hm->cap];
+        if (!mkey->ok) {
+            mkey = some(*key);
+            hm->vals[i%hm->cap]->at(h) = *val;
+            return;
+        } else if (equal(key, &mkey->value)) {
+            hm->vals[i%hm->cap]->at(h) = *val;
+            return;
+        }
+    }
+}
+
+template <typename K, typename V, typename _>
+maybe<V*> hashmap_get(const hashmap<K, V, _>* hm, const K* key)
+{
+    int32_t beg = hm->hash(key);
+    int32_t end = beg + hm->cap;
+    for (auto i = beg; i != end; i++) {
+        maybe<K>* mkey = hm->keys[i%hm->cap];
+        if (mkey->ok && equal(key, &mkey->value)) {
+            return some(hm->vals[i%hm->cap]);
+        }
+    }
+    return none<V*>();
+}
+
+template <typename K, typename V, typename _>
+maybe<V*> hashmap<K, V, _>::operator[](const K* key)
+{
+    return hashmap_get(this, key);
+}
+    
+template <typename K, typename V, typename _>
+hashmap_iter<K, V, _> hashmap_beg(hashmap<K, V, _>* hm)
+{
+    if (hm->len == 0) {
+        return hashmap_end(hm);
+    }
+    return hashmap_iter{.pos = 0, .hm = hm};
+}
+
+template <typename K, typename V, typename _>
+hashmap_iter<K, V, _> hashmap_end(hashmap<K, V, _>* hm)
+{
+    return hashmap_iter{.pos = hm->cap, .hm = hm};
 }

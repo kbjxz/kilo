@@ -62,7 +62,7 @@ void test_slice_append(test_handler* t)
         return;
     }
     for (auto i = 0; i < count; i++) {
-        t->assert(*s[i] == exp[i], "[%d] exp: %d, got: %d", s[i], exp[i]);
+        t->assert(s[i] == exp[i], "[%d] exp: %d, got: %d", s[i], exp[i]);
     }
 }
 
@@ -111,7 +111,7 @@ void test_basic_arena(test_handler* t)
         t->assert(a.alloc<char>(max_heap_size), "heap alloc failed");
         
         {
-            auto scratch = a.scratch();
+            auto scratch = basic_arena_scratch(&a);
             auto stack_data = scratch.alloc<char>(max_stack_size);
             t->assert(stack_data, "stack alloc failed");
             
