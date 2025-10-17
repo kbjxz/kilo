@@ -6,6 +6,9 @@
 #include <stdarg.h>
 #include <array>
 #include <tuple>
+#ifndef NDEBUG
+#include <iostream>
+#endif
 
 template<typename T>
 requires std::is_invocable_v<T>
@@ -31,6 +34,11 @@ struct __defer: T {
 inline void panic(const char* s)
 {
     perror(s);
+    exit(1);
+}
+
+inline void panic(void)
+{
     exit(1);
 }
 
@@ -110,21 +118,31 @@ Err result_unwrap_err(const result<_, Err>* r)
     return r->merr.value;
 }
 
-
-inline void assert(bool cond, const char* fmt, ...)
+#define assert(cond, fmt, ...)\
+internal::__assert(__FILE__, __LINE__, cond, fmt __VA_OPT__(,) __VA_ARGS__)
+namespace internal {
+inline void __assert(
+    std::decay_t<decltype(__FILE__)> file,
+    std::decay_t<decltype(__LINE__)> line,
+    bool cond, const char* fmt, ...
+)
 {
 #ifndef NDEBUG
     if (cond) {
         return;
     } 
 
-    printf("\t%s:%d: s", __FILE__, __LINE__);
+    printf("panic: ");
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);
     va_end(args);
-    printf("\n");
+
+    printf("\n\t%s:%d\n", file, line);
+    
+    panic();
 #endif
+}
 }
 
 #include <stddef.h>
@@ -510,47 +528,54 @@ void slice_reserve(slice<T>* s, size_t new_cap, base_arena<A>* a)
 template <typename T>
 void slice_append(slice<T>* s, T v, arena* a)
 {
-    if (s->len < s->cap) {
-        s->data[s->len] = v;
-        s->len++;
+    if (s->len == s->cap) {
+        static const size_t default_cap = 4;
+        size_t new_cap = s->cap ? s->cap * 2 : default_cap;
+
+        T* new_data = arena_alloc<T>(a, new_cap);
+        if (s->data) {
+            memcpy(new_data, s->data, sizeof(T) * s->len);
+        }
+        s->data = new_data;
+        s->cap = new_cap;
     }
     
-    static const size_t default_cap = 4;
-    size_t new_cap = s->cap ? s->cap * 2 : default_cap;
-
-    T* new_data = arena_alloc<T>(a, new_cap);
-    if (s->data) {
-        memcpy(new_data, s->data, s->len);
-    }
-
-    s->data = new_data;
+    s->data[s->len] = v;
     s->len += 1;
-    s->cap = new_cap;
+
+#ifndef NDEBUG
+    std::cout << "[slice_append] {";
+    for (size_t i = 0; i < s->len; i++) {
+        std::cout << s->data[i];
+        if (i + 1 != s->len) {
+            std::cout << ", ";
+        }
+    }
+    std::cout << "}" << std::endl;
+#endif
 }
 
 template <typename T, typename A>
 void slice_append(slice<T>* s, T v, base_arena<A>* a)
 {
-    if (s->len < s->cap) {
-        s->data[s->len] = v;
-        s->len++;
-    }
-    
-    static const size_t default_cap = 4;
-    size_t new_cap = s->cap ? s->cap * 2 : default_cap;
+    if (s->len == s->cap) {
+        static const size_t default_cap = 4;
+        size_t new_cap = s->cap ? s->cap * 2 : default_cap;
 
-    T* new_data = a->template alloc<T>(a, new_cap);
-    if (s->data) {
-        memcpy(new_data, s->data, s->len);
+        T* new_data = a->template alloc<T>(a, new_cap);
+        if (s->data) {
+            memcpy(new_data, s->data, s->len);
+        }
+        s->data = new_data;
+        s->cap = new_cap;
     }
-
-    s->data = new_data;
+     
+    s->data[s->len] = v;
     s->len += 1;
-    s->cap = new_cap;
 }
 
 template <typename T>
-slice<T> slice_sub(slice<T> s, int beg, int end)
+slice<T> slice_slice(slice<T> s, int beg, int end)
 {
     assert(0 <= beg && beg <= end && end <= s.len, 
         "index out of bound! in:[%d, %d), valid:[%d, %d)", 
