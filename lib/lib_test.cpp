@@ -122,6 +122,7 @@ void test_basic_arena(testing::handle* t)
         
         {
             auto scratch = basic_arena_scratch(&a);
+            defer { scratch_arena_drop(&scratch); };
             auto stack_data = scratch.alloc<char>(max_stack_size);
             testing::tassert(t, stack_data, "stack alloc failed");
             
