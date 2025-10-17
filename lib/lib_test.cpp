@@ -69,7 +69,7 @@ void test_slice_append(testing::handle* t)
 }
 
 template <typename T, size_t size, size_t alignment>
-constexpr void static_assert_sa(void)
+constexpr void assert_size_alignment(void)
 {
     static_assert(sizeof(T) == size);
     static_assert(alignof(T) == alignment);
@@ -77,7 +77,7 @@ constexpr void static_assert_sa(void)
 
 void test_basic_arena(testing::handle* t)
 {
-    test_subtest(t, "alloc array and exhausts one block", [](testing::handle* t) {
+    subtest(t, "alloc array and exhausts one block", [](testing::handle* t) {
         const int32_t chunk_size = 4096;
         basic_arena a = {};
         basic_arena_make(&a, chunk_size, 2, ARENA_STRATEGY_SILENT);
@@ -90,7 +90,21 @@ void test_basic_arena(testing::handle* t)
         }
     });
     
-    test_subtest(t, "alloc array and exhausts all possible chunks", [](testing::handle* t) {
+    subtest(t, "reset", [](testing::handle* t) {
+        const int32_t chunk_size = 1024;
+        basic_arena a = {};
+        basic_arena_make(&a, chunk_size, 1, ARENA_STRATEGY_SILENT);
+        defer { basic_arena_drop(&a); };
+        
+        const int32_t n = chunk_size / sizeof(char);
+        testing::tassert(t, a.alloc<char>(n), "heap alloc failed");
+        testing::tassert(t, !a.alloc<char>(1), "heap alloc should not succeed");
+
+        basic_arena_reset_heap(&a);
+        testing::tassert(t, a.alloc<char>(n), "heap alloc failed after reset");
+    });
+    
+    subtest(t, "alloc array and exhausts all possible chunks", [](testing::handle* t) {
         const int32_t chunk_size = 128;
         const int32_t max_chunks = 2;
         const int32_t max_allocs = 3; // chunks->[size:128]->[size:256]
@@ -109,7 +123,7 @@ void test_basic_arena(testing::handle* t)
         testing::tassert(t, !a.alloc<s>(1), "should failed on last alloc");
     });
     
-    test_subtest(t, "alloc heap and stack", [](testing::handle* t){
+    subtest(t, "alloc heap and stack", [](testing::handle* t){
         const int32_t chunk_size = 128;
         const int32_t max_heap_size = chunk_size / 2;
         const int32_t max_stack_size = chunk_size - max_heap_size;
@@ -133,7 +147,7 @@ void test_basic_arena(testing::handle* t)
         testing::tassert(t, a.alloc<char>(1), "heap alloc failed after scratch released");
     });
 
-    test_subtest(t, "mixed sizes", [](testing::handle* t) {
+    subtest(t, "mixed sizes", [](testing::handle* t) {
         const int32_t chunk_size = 1024;
         basic_arena a = {};
         basic_arena_make(&a, chunk_size);
@@ -141,7 +155,7 @@ void test_basic_arena(testing::handle* t)
 
         
         struct s1a1 { int8_t v; }; 
-        static_assert_sa<s1a1, 1, 1>();
+        assert_size_alignment<s1a1, 1, 1>();
         auto p1 = a.alloc<s1a1>(1);
         testing::tassert(t, p1, "s1a1");
         testing::logf(t, "&s1a1: %p", p1);
@@ -150,7 +164,7 @@ void test_basic_arena(testing::handle* t)
         struct s7a1 {
             int8_t v[7];
         };
-        static_assert_sa<s7a1, 7, 1>();
+        assert_size_alignment<s7a1, 7, 1>();
         auto p2 = a.alloc<s7a1>(1);
         testing::tassert(t, p2, "s7a1");
         testing::logf(t, "&s7a1: %p", p2);
@@ -159,7 +173,7 @@ void test_basic_arena(testing::handle* t)
             int32_t v1[2];
             int8_t v3;
         };
-        static_assert_sa<s12a4, 12, 4>();
+        assert_size_alignment<s12a4, 12, 4>();
         auto p3 = a.alloc<s12a4>(1);
         testing::tassert(t, p3, "s12a4");
         testing::logf(t, "&s12a4: %p", p3);
@@ -167,7 +181,7 @@ void test_basic_arena(testing::handle* t)
         struct s24a8 {
             int64_t v[3];
         };
-        static_assert_sa<s24a8, 24, 8>();
+        assert_size_alignment<s24a8, 24, 8>();
         auto p4 = a.alloc<s24a8>(1);
         testing::tassert(t, p4, "s24a8");
         testing::logf(t, "&s24a8: %p", p4);

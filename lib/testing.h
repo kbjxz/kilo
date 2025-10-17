@@ -34,7 +34,7 @@ void main(std::initializer_list<case_t> tests);
 void test_setup(handle* h, const case_t* tc, handle* parent);
 void test_print_name(handle* h);
 bool test_run(handle* h);
-void test_subtest(
+void subtest(
     handle* t, 
     const char* name, 
     test_func f, 
@@ -63,11 +63,11 @@ namespace internal {
 
 } // end of internal
 
-#define logf(h, fmt, ...) \
-internal::__logf(h, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
+#define logf(t, fmt, ...) \
+internal::__logf(t, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
-#define tassert(h, cond, fmt, ...) \
-internal::__assert(h, __FILE__, __LINE__, cond, fmt __VA_OPT__(,) __VA_ARGS__)
+#define tassert(t, cond, fmt, ...) \
+internal::__assert(t, __FILE__, __LINE__, cond, fmt __VA_OPT__(,) __VA_ARGS__)
 
 } // end of testing
 

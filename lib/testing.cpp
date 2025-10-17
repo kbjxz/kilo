@@ -22,7 +22,7 @@ T* test_get_args(handle* t)
     return (T*)t->args;
 }
 
-void test_subtest(
+void subtest(
     handle* t, 
     const char* name, 
     test_func f, 

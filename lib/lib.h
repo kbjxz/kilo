@@ -232,9 +232,9 @@ T* arena_alloc(arena* a, int n = 1)
             heap_size                               stack_size
         /              \                        /               \      
         |      ...     |      free space        |      ...      |  basic_arena_chunk  |
-        ^                                                       ^  |
-        .data                                            .data+cap |    
-        |__________________________________________________________|
+        ^                                                       ^          |
+        .data                                            .data+cap         |    
+        |__________________________________________________________________|
 */ 
 struct basic_arena_chunk {
     basic_arena_chunk* next;
@@ -345,7 +345,7 @@ inline void basic_arena_drop(basic_arena* a)
     }
 }
     
-static void* basic_arena_oom(arena_strategy strat)
+static void* basic_arena_oom(const arena_strategy strat)
 {
     switch (strat) {
     case ARENA_STRATEGY_PANIC:
@@ -397,7 +397,7 @@ T* basic_arena_alloc(basic_arena* a, int32_t n)
     return mret();
 }
 
-inline void basic_arena_reset(basic_arena* a, bool shrink = false)
+inline void basic_arena_reset_heap(basic_arena* a, bool shrink = false)
 {
     basic_arena_chunk* tmp = NULL;
     basic_arena_chunk* curr = a->head;
