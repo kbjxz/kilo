@@ -502,6 +502,15 @@ void slice_reserve(slice<T>* s, size_t new_cap, A* a)
 
 template <typename T, typename A>
 requires is_arena_allocator<T, A>
+void slice_make_n(slice<T>* s, size_t len, A* a)
+{
+    s->data = arena_alloc<T>(a, len);
+    assert(s->data, "arena_alloc failed");
+    s->cap = len;
+}
+
+template <typename T, typename A>
+requires is_arena_allocator<T, A>
 void slice_append(slice<T>* s, T v, A* a)
 {
     if (s->len == s->cap) {
@@ -590,12 +599,29 @@ void string_append(string* s, const string* oth, A* a)
     s->len += oth->len;
 }
 
+bool string_equal(const string* s1, const string* s2)
+{
+    if (s1->len != s2->len) {
+        return false;
+    }
+    return memcmp(s1->data, s2->data, s1->len) == 0;
+}
+
 
 template <typename K, typename V, typename A>
 requires is_arena_allocator<K, A> && is_arena_allocator<V, A>
 struct hashmap {
-    using equal_func = bool(*)(const K*, const K*);
-    using hash_func = size_t(*)(const K);
+    typedef K key_type;
+    typedef slice<maybe<key_type>> key_slice;
+    typedef V val_type;
+    typedef slice<V> val_slice;
+    typedef A arena_type;
+    typedef bool(*equal_func )(const K*, const K*) ;
+    typedef  size_t(*hash_func)(const K*) ;
+    typedef struct {
+        const key_type* key; 
+        val_type* val;
+    } kv_pair;
     
     static constexpr int load_factor = 6; // => 0.6
     
@@ -618,17 +644,27 @@ struct hashmap_iter {
     int32_t pos;
     hashmap<K, V, _>* hm;
     
-    inline void operator++()
+    hashmap_iter operator++(int)
     {
+        auto old = *this;
         pos++;
         for (; pos != hm->cap && !hm->keys[pos]; pos++) {
         }
+        return old;
     }
     
-    using hashmap_kv = std::tuple<const K*, V*>;
-    inline hashmap_kv operator*() 
+    
+
+    hashmap<K, V, _>::kv_pair operator*() 
     {
-        return std::make_tuple(&hm->keys[pos].value, &hm->vals[pos].value);
+        return {&hm->keys[pos].value, &hm->vals[pos]};
+    }
+    
+    bool operator==(const hashmap_iter& oth) {
+        return hm == oth.hm && pos == oth.pos;
+    }
+    bool operator!=(const hashmap_iter& oth) {
+        return (*this) != oth;
     }
 };
 
@@ -657,8 +693,10 @@ void make_hashmap(
 // linear probing
 template <typename K, typename V, typename _>
 bool __hashmap_put_noresize(
-    slice<maybe<K>>* keys, slice<V>* vals,
-    const K* key, const V* val,
+    typename hashmap<K, V, _>::key_slice* keys, 
+    typename hashmap<K, V, _>::val_slice* vals,
+    const typename hashmap<K, V, _>::key_type* key, 
+    const typename hashmap<K, V, _>::val_type* val,
     typename hashmap<K, V, _>::hash_func hash,
     typename hashmap<K, V, _>::equal_func equal
 )
@@ -666,13 +704,14 @@ bool __hashmap_put_noresize(
     const int32_t cap = keys->cap;
     int32_t pos = hash(key) % cap;
     for (auto i = pos; i != pos + cap; i++) {
-        auto mkey = keys[i%cap];
+        maybe<K>& mkey = keys[i%cap];
         if (!mkey) {
             keys[i] = some(*key);
             vals[i] = *val;
             return true;
-        } else if (equal(key, &mkey->value)) {
-            vals[i] = *val;
+        } else if (equal(key, &mkey.value)) {
+            V& v = vals[i];
+            v = *val;
             return true;
         }
     }
@@ -694,9 +733,9 @@ void __hashmap_resize(hashmap<K, V, A>* hm)
             continue;
         }
         
-        auto ok = __hashmap_put_noresize(
+        auto ok = __hashmap_put_noresize<K, V, A>(
             &new_keys, &new_vals, 
-            &hm->keys[i], &hm->vals[i], 
+            &hm->keys[i].value, &hm->vals[i], 
             hm->hash, hm->equal);
         assert(ok, "move kv failed");
     }
@@ -713,7 +752,7 @@ void hashmap_put(hashmap<K, V, A>* hm, const K* key, const V* val)
         __hashmap_resize(hm);
     }
 
-    auto ok =__hashmap_put_noresize(
+    auto ok =__hashmap_put_noresize<K, V, A>(
         &hm->keys, &hm->vals, key, val, 
         hm->hash, hm->equal);
     assert(ok, "put failed");
@@ -755,7 +794,7 @@ hashmap_iter<K, V, _> hashmap_end(hashmap<K, V, _>* hm)
 
 // Return 64-bit FNV-1a hash for key (NUL-terminated). See description:
 // https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
-static uint64_t hash_key(const void* key, size_t n) {
+static uint64_t hash_bytes(const void* key, size_t n) {
     uint64_t hash = FNV_OFFSET;
     const auto ckey = (unsigned char*)key;
     for (size_t i = 0; i < n; i++) {
@@ -768,11 +807,11 @@ static uint64_t hash_key(const void* key, size_t n) {
 template <typename T>
 uint64_t hash_key(const T* key)
 {
-    return hash_key(key, sizeof(T));
+    return hash_bytes(key, sizeof(T));
 }
 
 template <typename T>
 uint64_t hash_key(const slice<T>* key)
 {
-    return hash_key(key->data, key->len);
+    return hash_bytes(key->data, key->len);
 }
