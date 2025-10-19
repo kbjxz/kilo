@@ -296,8 +296,8 @@ maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t data_size, int32_t 
     return some((T*)(void*)ret);
 }
 
-template<typename T, typename A>
-T* arena_alloc(A* arena, int32_t n);
+/* template<typename T, typename A>
+T* arena_alloc(A* arena, int32_t n); */
 
 template<typename T, typename A>
 concept is_arena_allocator = requires(A* a, int32_t n)
@@ -485,21 +485,8 @@ struct slice {
     }
 };
 
-template <typename T>
-void slice_reserve(slice<T>* s, size_t new_cap, arena* a)
-{
-    if (s->cap >= new_cap) {
-        return;
-    }
-    T* new_data = arena_alloc<T>(a, new_cap);
-    if (s->data) {
-        memcpy(new_data, s->data, s->len);
-    }
-    s->data = new_data;
-    s->cap = new_cap;
-}
-
 template <typename T, typename A>
+requires is_arena_allocator<T, A>
 void slice_reserve(slice<T>* s, size_t new_cap, A* a)
 {
     if (s->cap >= new_cap) {
@@ -575,24 +562,28 @@ const string string_from(const char (&a)[N])
     return string_from(std::to_array(a));
 }
 
-inline void string_reserve(string* s, size_t new_cap, arena* a)
+template <typename A>
+inline void string_reserve(string* s, size_t new_cap, A* a)
 {
     slice_reserve(s, new_cap, a);
 }
 
-inline void string_append(string* s, const char* v, size_t n, arena* a)
+template <typename A>
+void string_append(string* s, const char* v, size_t n, A* a)
 {
     slice_reserve(s, s->len + n, a);
     memcpy(&s->data[s->len], v, n);
     s->len += n;
 }
 
-inline void string_append(string* s, char c, arena* a)
+template <typename A>
+void string_append(string* s, char c, A* a)
 {
     slice_append(s, c, a);
 }
 
-inline void string_append(string* s, const string* oth, arena* a)
+template <typename A>
+void string_append(string* s, const string* oth, A* a)
 {
     slice_reserve(s, s->len + oth->len, a);
     memcpy(&s->data[s->len], oth->data, oth->len);  
@@ -601,6 +592,7 @@ inline void string_append(string* s, const string* oth, arena* a)
 
 
 template <typename K, typename V, typename A>
+requires is_arena_allocator<K, A> && is_arena_allocator<V, A>
 struct hashmap {
     using equal_func = bool(*)(const K*, const K*);
     using hash_func = size_t(*)(const K);
@@ -615,7 +607,10 @@ struct hashmap {
     slice<maybe<K>> keys;
     slice<V> vals;
     
-    maybe<V*> operator[](const K* key);
+    maybe<V*> operator[](const K* key)
+    {
+        return hashmap_get(this, key);
+    }
 };
 
 template <typename K, typename V, typename _>
@@ -736,12 +731,6 @@ maybe<V*> hashmap_get(const hashmap<K, V, _>* hm, const K* key)
         }
     }
     return none<V*>();
-}
-
-template <typename K, typename V, typename _>
-maybe<V*> hashmap<K, V, _>::operator[](const K* key)
-{
-    return hashmap_get(this, key);
 }
     
 template <typename K, typename V, typename _>
