@@ -1,3 +1,5 @@
+#include "defer.h"
+#include "err.h"
 #include <cmath>
 #include <concepts>
 #include <cstdint>
@@ -10,113 +12,9 @@
 #include <iostream>
 #endif
 
-template<typename T>
-requires std::is_invocable_v<T>
-struct __defer: T {
-    [[gnu::always_inline]]
-    __defer(T g) : T(g) 
-    {}
-
-    [[gnu::always_inline]]
-    ~__defer() 
-    {
-        T::operator()();
-    }
-};
- 
-#define __DEFER__(V)  __defer const V = [&](void)->void
 
 
-#define defer __DEFER(__COUNTER__)
-#define __DEFER(N) __DEFER_(N)
-#define __DEFER_(N) __DEFER__(__DEFER_VARIABLE_ ## N)
 
-inline void panic(const char* s)
-{
-    perror(s);
-    exit(1);
-}
-
-inline void panic(void)
-{
-    exit(1);
-}
-
-template <typename F>
-requires std::is_invocable_v<F>
-void panic(const char* s, F cleanup)
-{
-    cleanup();
-    perror(s);
-    exit(1);
-}
-
-struct error {
-    int err_no;
-    const char* msg;
-};
-
-template <typename T>
-struct maybe {
-    T value;
-    bool ok;
-    
-    operator bool()
-    {
-        return ok; 
-    }
-    T operator() ()
-    {
-        return value;
-    }
-};
-
-template <typename T>
-maybe<T> some(T v)
-{
-    return maybe<T>{.value = v, .ok = true};
-}
-
-template <typename T>
-maybe<T> none()
-{
-    return maybe<T>{.value = {}, .ok = false};
-}
-
-template <typename T, typename Err = error>
-struct result {
-    maybe<Err> merr;
-    T value;
-    
-    operator bool ()
-    {
-        return !merr;
-    }
-};
-
-template <typename T, typename Err = error>
-result<T, Err> result_err(Err e)
-{
-    return result<T, Err>{.merr = some(e), .value ={}};
-}
-
-template <typename T, typename Err = error>
-result<T, Err> result_v(T v)
-{
-    return result<T, Err>{.merr = none<Err>(), .value =v};
-}
-
-template <typename _, typename Err>
-bool result_is_err(const result<_, Err>* r)
-{
-    return r->merr.ok;
-}
-
-template <typename _, typename Err>
-Err result_unwrap_err(const result<_, Err>* r)
-{
-    return r->merr.value;
-}
 
 #define assert(cond, fmt, ...)\
 internal::__assert(__FILE__, __LINE__, cond, fmt __VA_OPT__(,) __VA_ARGS__)
