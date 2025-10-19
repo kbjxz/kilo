@@ -47,7 +47,8 @@ void test_slice_append(testing::handle* t)
 {
     constexpr int count = 10;
     constexpr std::array<int, count> exp = {0,1,2,3,4,5,6,7,8,9};
-    arena a = arena_new(1024);
+    basic_arena a = {};
+    basic_arena_make(&a, 1024);
     slice<int> s = {};
 
     // slice cap: 4, 8, 16
@@ -84,7 +85,7 @@ void test_basic_arena(testing::handle* t)
         defer { basic_arena_drop(&a); };
         
         const int32_t array_len = chunk_size / sizeof(int32_t);
-        int32_t* array = a.alloc<int32_t>(array_len); 
+        int32_t* array = arena_alloc<int32_t>(&a, array_len); 
         for (auto i = 0; i < array_len; i++) {
             testing::tassert(t, array[i] == 0, "array[%d]=%d", i, array[i]);
         }
@@ -97,11 +98,11 @@ void test_basic_arena(testing::handle* t)
         defer { basic_arena_drop(&a); };
         
         const int32_t n = chunk_size / sizeof(char);
-        testing::tassert(t, a.alloc<char>(n), "heap alloc failed");
-        testing::tassert(t, !a.alloc<char>(1), "heap alloc should not succeed");
+        testing::tassert(t, arena_alloc<char>(&a, n), "heap alloc failed");
+        testing::tassert(t, !arena_alloc<char>(&a, 1), "heap alloc should not succeed");
 
         basic_arena_reset_heap(&a);
-        testing::tassert(t, a.alloc<char>(n), "heap alloc failed after reset");
+        testing::tassert(t, arena_alloc<char>(&a, n), "heap alloc failed after reset");
     });
     
     subtest(t, "alloc array and exhausts all possible chunks", [](testing::handle* t) {
@@ -116,11 +117,11 @@ void test_basic_arena(testing::handle* t)
         
         
         for (auto i = 0; i < max_allocs; i++) {
-            auto p = a.alloc<s>(1); 
+            auto p = arena_alloc<s>(&a, 1); 
             testing::tassert(t, p, "alloc[%d] failed", i);
         }
 
-        testing::tassert(t, !a.alloc<s>(1), "should failed on last alloc");
+        testing::tassert(t, !arena_alloc<s>(&a, 1), "should failed on last alloc");
     });
     
     subtest(t, "alloc heap and stack", [](testing::handle* t){
@@ -132,19 +133,19 @@ void test_basic_arena(testing::handle* t)
         basic_arena_make(&a, chunk_size, 1 , ARENA_STRATEGY_SILENT);
         defer { basic_arena_drop(&a); };
 
-        testing::tassert(t, a.alloc<char>(max_heap_size), "heap alloc failed");
+        testing::tassert(t, arena_alloc<char>(&a, max_heap_size), "heap alloc failed");
         
         {
             auto scratch = basic_arena_scratch(&a);
             defer { scratch_arena_drop(&scratch); };
-            auto stack_data = scratch.alloc<char>(max_stack_size);
+            auto stack_data = arena_alloc<char>(&scratch, max_stack_size);
             testing::tassert(t, stack_data, "stack alloc failed");
             
-            testing::tassert(t, !a.alloc<char>(1), "heap alloc succeeded unexpectedly");
-            testing::tassert(t, !scratch.alloc<char>(1), "stack alloc succeeded unexpectedly");
+            testing::tassert(t, !arena_alloc<char>(&a, 1), "heap alloc succeeded unexpectedly");
+            testing::tassert(t, !arena_alloc<char>(&scratch, 1), "stack alloc succeeded unexpectedly");
         }
         
-        testing::tassert(t, a.alloc<char>(1), "heap alloc failed after scratch released");
+        testing::tassert(t, arena_alloc<char>(&a, 1), "heap alloc failed after scratch released");
     });
 
     subtest(t, "mixed sizes", [](testing::handle* t) {
@@ -156,7 +157,7 @@ void test_basic_arena(testing::handle* t)
         
         struct s1a1 { int8_t v; }; 
         assert_size_alignment<s1a1, 1, 1>();
-        auto p1 = a.alloc<s1a1>(1);
+        auto p1 = arena_alloc<s1a1>(&a, 1);
         testing::tassert(t, p1, "s1a1");
         testing::logf(t, "&s1a1: %p", p1);
         
@@ -165,7 +166,7 @@ void test_basic_arena(testing::handle* t)
             int8_t v[7];
         };
         assert_size_alignment<s7a1, 7, 1>();
-        auto p2 = a.alloc<s7a1>(1);
+        auto p2 = arena_alloc<s7a1>(&a, 1);
         testing::tassert(t, p2, "s7a1");
         testing::logf(t, "&s7a1: %p", p2);
 
@@ -174,7 +175,7 @@ void test_basic_arena(testing::handle* t)
             int8_t v3;
         };
         assert_size_alignment<s12a4, 12, 4>();
-        auto p3 = a.alloc<s12a4>(1);
+        auto p3 = arena_alloc<s12a4>(&a, 1);
         testing::tassert(t, p3, "s12a4");
         testing::logf(t, "&s12a4: %p", p3);
 
@@ -182,7 +183,7 @@ void test_basic_arena(testing::handle* t)
             int64_t v[3];
         };
         assert_size_alignment<s24a8, 24, 8>();
-        auto p4 = a.alloc<s24a8>(1);
+        auto p4 = arena_alloc<s24a8>(&a, 1);
         testing::tassert(t, p4, "s24a8");
         testing::logf(t, "&s24a8: %p", p4);
     });

@@ -296,34 +296,28 @@ maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t data_size, int32_t 
     return some((T*)(void*)ret);
 }
 
-template <typename A>
-struct base_arena {
-    template<typename T>
-    T* alloc(int32_t n)
-    {
-        return (A*)(this)->alloc<T>(n);
-    }
+template<typename T, typename A>
+T* arena_alloc(A* arena, int32_t n);
+
+template<typename T, typename A>
+concept is_arena_allocator = requires(A* a, int32_t n)
+{
+    arena_alloc<T>(a, n);
 };
 
 struct scratch_arena;
 
-struct basic_arena : public base_arena<basic_arena> {
+struct basic_arena {
     basic_arena_chunk* head;
     int32_t chunk_count;
     int32_t chunk_count_max;
     arena_strategy strat;
-    
-    template<typename T>
-    T* alloc(int32_t n)
-    {
-        return basic_arena_alloc<T>(this, n);
-    }
 };
 
 inline void basic_arena_make(
     basic_arena* a,
     int32_t init_size = 4 * KB, 
-    int32_t max_chunks = 4,
+    int32_t max_chunks = 2,
     arena_strategy strategy = ARENA_STRATEGY_PANIC
 )
 {
@@ -358,8 +352,8 @@ static void* basic_arena_oom(const arena_strategy strat)
     return NULL;
 }
 
-template<typename T>
-T* basic_arena_alloc(basic_arena* a, int32_t n)
+template<typename T, typename A = basic_arena>
+T* arena_alloc(basic_arena* a, int32_t n)
 {
     static const int32_t alignment = alignof(T);
     const int32_t data_size = sizeof(T) * n;
@@ -446,16 +440,10 @@ maybe<T*> chunk_alloc_stack(basic_arena_chunk* chunk, int32_t data_size, int32_t
 template<typename T>
 T* scratch_arena_alloc(scratch_arena* a, int32_t n);
 
-struct scratch_arena : public base_arena<scratch_arena> {
+struct scratch_arena {
     basic_arena_chunk* chunk;
     int32_t old_stack_size;
     arena_strategy strat;
-    
-    template<typename T>
-    T* alloc(int32_t n)
-    {
-        return scratch_arena_alloc<T>(this, n);
-    }
 };
 
 inline void scratch_arena_drop(scratch_arena* a)
@@ -463,8 +451,8 @@ inline void scratch_arena_drop(scratch_arena* a)
     a->chunk->stack_size = a->old_stack_size;
 }
 
-template<typename T>
-T* scratch_arena_alloc(scratch_arena* a, int32_t n)
+template<typename T, typename A = scratch_arena>
+T* arena_alloc(scratch_arena* a, int32_t n)
 {
     static const int32_t alignment = alignof(T);
     const int32_t data_size = sizeof(T) * n; 
@@ -512,12 +500,12 @@ void slice_reserve(slice<T>* s, size_t new_cap, arena* a)
 }
 
 template <typename T, typename A>
-void slice_reserve(slice<T>* s, size_t new_cap, base_arena<A>* a)
+void slice_reserve(slice<T>* s, size_t new_cap, A* a)
 {
     if (s->cap >= new_cap) {
         return;
     }
-    T* new_data = a->template alloc<T>(new_cap);
+    T* new_data = arena_alloc<T>(a, new_cap);
     if (s->data) {
         memcpy(new_data, s->data, s->len);
     }
@@ -525,8 +513,9 @@ void slice_reserve(slice<T>* s, size_t new_cap, base_arena<A>* a)
     s->cap = new_cap;
 }
 
-template <typename T>
-void slice_append(slice<T>* s, T v, arena* a)
+template <typename T, typename A>
+requires is_arena_allocator<T, A>
+void slice_append(slice<T>* s, T v, A* a)
 {
     if (s->len == s->cap) {
         static const size_t default_cap = 4;
@@ -553,25 +542,6 @@ void slice_append(slice<T>* s, T v, arena* a)
     }
     std::cout << "}" << std::endl;
 #endif
-}
-
-template <typename T, typename A>
-void slice_append(slice<T>* s, T v, base_arena<A>* a)
-{
-    if (s->len == s->cap) {
-        static const size_t default_cap = 4;
-        size_t new_cap = s->cap ? s->cap * 2 : default_cap;
-
-        T* new_data = a->template alloc<T>(a, new_cap);
-        if (s->data) {
-            memcpy(new_data, s->data, s->len);
-        }
-        s->data = new_data;
-        s->cap = new_cap;
-    }
-     
-    s->data[s->len] = v;
-    s->len += 1;
 }
 
 template <typename T>
@@ -641,7 +611,7 @@ struct hashmap {
     int32_t cap;
     hash_func hash;
     equal_func equal;
-    base_arena<A>* arena;
+    A* arena;
     slice<maybe<K>> keys;
     slice<V> vals;
     
@@ -670,7 +640,7 @@ struct hashmap_iter {
 template <typename K, typename V, typename A>
 void make_hashmap(
     hashmap<K, V, A>* hm,
-    base_arena<A>* arena,
+    A* arena,
     typename hashmap<K, V, A>::hash_func hash,
     typename hashmap<K, V, A>::equal_func equal,
     int32_t cap = 32
