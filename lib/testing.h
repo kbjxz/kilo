@@ -66,7 +66,7 @@ namespace internal {
 #define logf(t, fmt, ...) \
 internal::__logf(t, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
-#define tassert(t, cond, fmt, ...) \
+#define assertf(t, cond, fmt, ...) \
 internal::__assert(t, __FILE__, __LINE__, cond, fmt __VA_OPT__(,) __VA_ARGS__)
 
 } // end of testing
