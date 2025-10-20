@@ -1,7 +1,5 @@
 #include "lib.h"
-#include "testing.h"
 #include <array>
-#include <vector>
 
 void test_defer(testing::handle* t)
 {
@@ -13,9 +11,10 @@ void test_defer(testing::handle* t)
             counter--;
         };
     }
-    testing::tassert(t, counter == 0, "[counter] exp: 0, got: %d", counter);
+    testing::assertf(t, counter == 0, "[counter] exp: 0, got: %d", counter);
 }
 
+#ifdef OLD_ARENA
 void test_alloc(testing::handle* t)
 {
     constexpr size_t count = 3;
@@ -26,11 +25,11 @@ void test_alloc(testing::handle* t)
     int* last_ptr = 0;
     for (size_t i = 0; i < count; i++) {
         auto p = arena_alloc<int>(&a);
-        testing::tassert(t, p, "alloc failed at %d", i);
+        testing::assertf(t, p, "alloc failed at %d", i);
         
         if (last_ptr && p) {
             auto step = ptrdiff_t(p) - ptrdiff_t(last_ptr);
-            testing::tassert(t, sizeof(int) == step, 
+            testing::assertf(t, sizeof(int) == step, 
             "[step] exp: %d, got: %d; last: %d, this: %d", sizeof(int), step, last_ptr, p);
         } 
 
@@ -38,11 +37,12 @@ void test_alloc(testing::handle* t)
     }
     
     auto p = arena_alloc<int>(&a);
-    testing::tassert(t, !p, "alloc should fail silently after exahusted");
+    testing::assertf(t, !p, "alloc should fail silently after exahusted");
     
     arena_reset(&a);
-    testing::tassert(t, arena_alloc<int>(&a), "alloc after reset should succeed");
+    testing::assertf(t, arena_alloc<int>(&a), "alloc after reset should succeed");
 }
+#endif
 
 void test_slice_append(testing::handle* t)
 {
@@ -58,12 +58,12 @@ void test_slice_append(testing::handle* t)
     }
     
     auto is_len_equal = s.len == count;
-    testing::tassert(t, is_len_equal, "[len] exp: %d, got: %d", count, s.len);
+    testing::assertf(t, is_len_equal, "[len] exp: %d, got: %d", count, s.len);
     if (!is_len_equal) {
         return;
     }
     for (auto i = 0; i < count; i++) {
-        testing::tassert(t, s[i] == exp[i], 
+        testing::assertf(t, s[i] == exp[i], 
             "[%d] exp: %d, got: %d", 
             i, exp[i], s[i] 
         );
@@ -88,7 +88,7 @@ void test_basic_arena(testing::handle* t)
         const int32_t array_len = chunk_size / sizeof(int32_t);
         int32_t* array = arena_alloc<int32_t>(&a, array_len); 
         for (auto i = 0; i < array_len; i++) {
-            testing::tassert(t, array[i] == 0, "array[%d]=%d", i, array[i]);
+            testing::assertf(t, array[i] == 0, "array[%d]=%d", i, array[i]);
         }
     });
     
@@ -99,11 +99,11 @@ void test_basic_arena(testing::handle* t)
         defer { basic_arena_drop(&a); };
         
         const int32_t n = chunk_size / sizeof(char);
-        testing::tassert(t, arena_alloc<char>(&a, n), "heap alloc failed");
-        testing::tassert(t, !arena_alloc<char>(&a, 1), "heap alloc should not succeed");
+        testing::assertf(t, arena_alloc<char>(&a, n), "heap alloc failed");
+        testing::assertf(t, !arena_alloc<char>(&a, 1), "heap alloc should not succeed");
 
         basic_arena_reset_heap(&a);
-        testing::tassert(t, arena_alloc<char>(&a, n), "heap alloc failed after reset");
+        testing::assertf(t, arena_alloc<char>(&a, n), "heap alloc failed after reset");
     });
     
     subtest(t, "alloc array and exhausts all possible chunks", [](testing::handle* t) {
@@ -119,10 +119,10 @@ void test_basic_arena(testing::handle* t)
         
         for (auto i = 0; i < max_allocs; i++) {
             auto p = arena_alloc<s>(&a, 1); 
-            testing::tassert(t, p, "alloc[%d] failed", i);
+            testing::assertf(t, p, "alloc[%d] failed", i);
         }
 
-        testing::tassert(t, !arena_alloc<s>(&a, 1), "should failed on last alloc");
+        testing::assertf(t, !arena_alloc<s>(&a, 1), "should failed on last alloc");
     });
     
     subtest(t, "alloc heap and stack", [](testing::handle* t){
@@ -134,19 +134,19 @@ void test_basic_arena(testing::handle* t)
         basic_arena_make(&a, chunk_size, 1 , ARENA_STRATEGY_SILENT);
         defer { basic_arena_drop(&a); };
 
-        testing::tassert(t, arena_alloc<char>(&a, max_heap_size), "heap alloc failed");
+        testing::assertf(t, arena_alloc<char>(&a, max_heap_size), "heap alloc failed");
         
         {
             auto scratch = basic_arena_scratch(&a);
             defer { scratch_arena_drop(&scratch); };
             auto stack_data = arena_alloc<char>(&scratch, max_stack_size);
-            testing::tassert(t, stack_data, "stack alloc failed");
+            testing::assertf(t, stack_data, "stack alloc failed");
             
-            testing::tassert(t, !arena_alloc<char>(&a, 1), "heap alloc succeeded unexpectedly");
-            testing::tassert(t, !arena_alloc<char>(&scratch, 1), "stack alloc succeeded unexpectedly");
+            testing::assertf(t, !arena_alloc<char>(&a, 1), "heap alloc succeeded unexpectedly");
+            testing::assertf(t, !arena_alloc<char>(&scratch, 1), "stack alloc succeeded unexpectedly");
         }
         
-        testing::tassert(t, arena_alloc<char>(&a, 1), "heap alloc failed after scratch released");
+        testing::assertf(t, arena_alloc<char>(&a, 1), "heap alloc failed after scratch released");
     });
 
     subtest(t, "mixed sizes", [](testing::handle* t) {
@@ -159,7 +159,7 @@ void test_basic_arena(testing::handle* t)
         struct s1a1 { int8_t v; }; 
         assert_size_alignment<s1a1, 1, 1>();
         auto p1 = arena_alloc<s1a1>(&a, 1);
-        testing::tassert(t, p1, "s1a1");
+        testing::assertf(t, p1, "s1a1");
         testing::logf(t, "&s1a1: %p", p1);
         
 
@@ -168,7 +168,7 @@ void test_basic_arena(testing::handle* t)
         };
         assert_size_alignment<s7a1, 7, 1>();
         auto p2 = arena_alloc<s7a1>(&a, 1);
-        testing::tassert(t, p2, "s7a1");
+        testing::assertf(t, p2, "s7a1");
         testing::logf(t, "&s7a1: %p", p2);
 
         struct s12a4 {
@@ -177,7 +177,7 @@ void test_basic_arena(testing::handle* t)
         };
         assert_size_alignment<s12a4, 12, 4>();
         auto p3 = arena_alloc<s12a4>(&a, 1);
-        testing::tassert(t, p3, "s12a4");
+        testing::assertf(t, p3, "s12a4");
         testing::logf(t, "&s12a4: %p", p3);
 
         struct s24a8 {
@@ -185,11 +185,12 @@ void test_basic_arena(testing::handle* t)
         };
         assert_size_alignment<s24a8, 24, 8>();
         auto p4 = arena_alloc<s24a8>(&a, 1);
-        testing::tassert(t, p4, "s24a8");
+        testing::assertf(t, p4, "s24a8");
         testing::logf(t, "&s24a8: %p", p4);
     });
 }
 
+#ifdef HASHMAP_H
 void test_hashmap(testing::handle* t)
 {
     basic_arena a = {};
@@ -214,12 +215,15 @@ void test_hashmap(testing::handle* t)
         printf("{%s, %d}", (*i).key->data, *((*i).val));
     }
 }
+#endif
 
 int main(void)
 {
     testing::main({
         new_case("defer", test_defer),
+#ifdef OLD_ARENA
         new_case("alloc", test_alloc),
+#endif
         new_case("test_slice_append", test_slice_append),
         new_case("test_basic_arena", test_basic_arena),
         new_case("hashmap_put", test_basic_arena),

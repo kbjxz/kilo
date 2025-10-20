@@ -1,7 +1,7 @@
 #ifndef DEFER_H
 #define DEFER_H
 
-#include <concepts>
+#include <type_traits>
  
 #define __DEFER__(V)  __defer const V = [&](void)->void
 #define defer __DEFER(__COUNTER__)

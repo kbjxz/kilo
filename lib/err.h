@@ -122,7 +122,7 @@ result<T, Err> result_val(T v)
 }
 
 template <typename _, typename Err>
-Err result_get_err(const result<_, Err>& r)
+Err err(const result<_, Err>& r)
 {
     return r.merr.val;
 }
