@@ -21,7 +21,7 @@ struct slice {
 };
 
 template <typename T, typename A>
-requires is_arena_allocator<T, A>
+requires is_arena_allocator<A>
 void slice_reserve(slice<T>* s, size_t new_cap, A* a)
 {
     if (s->cap >= new_cap) {
@@ -36,7 +36,7 @@ void slice_reserve(slice<T>* s, size_t new_cap, A* a)
 }
 
 template <typename T, typename A>
-requires is_arena_allocator<T, A>
+requires is_arena_allocator<A>
 void slice_make_n(slice<T>* s, size_t len, A* a)
 {
     s->data = arena_alloc<T>(a, len);
@@ -45,7 +45,7 @@ void slice_make_n(slice<T>* s, size_t len, A* a)
 }
 
 template <typename T, typename A>
-requires is_arena_allocator<T, A>
+requires is_arena_allocator<A>
 void slice_append(slice<T>* s, T v, A* a)
 {
     if (s->len == s->cap) {

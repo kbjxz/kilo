@@ -136,10 +136,10 @@ maybe<T*> chunk_alloc_heap(basic_arena_chunk* chunk, int32_t data_size, int32_t 
     return some((T*)(void*)ret);
 }
 
-template<typename T, typename A>
+template<typename A>
 concept is_arena_allocator = requires(A* a, int32_t n)
 {
-    arena_alloc<T>(a, n);
+    arena_alloc<int>(a, n);
 };
 
 struct scratch_arena;

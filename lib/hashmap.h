@@ -5,7 +5,7 @@
 #include "string.h"
 
 template <typename K, typename V, typename A>
-requires is_arena_allocator<K, A> && is_arena_allocator<V, A>
+requires is_arena_allocator<A>
 struct hashmap {
     typedef K key_type;
     typedef slice<maybe<key_type>> key_slice;
