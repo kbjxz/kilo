@@ -1,4 +1,5 @@
 #include "lib.h"
+#include "hashmap.h"
 #include <array>
 
 void test_defer(testing::handle* t)
@@ -191,28 +192,33 @@ void test_basic_arena(testing::handle* t)
 }
 
 #ifdef HASHMAP_H
+#include <vector>
+
+struct pair {
+        const string key;
+        int32_t val;
+};
+
 void test_hashmap(testing::handle* t)
 {
     basic_arena a = {};
     basic_arena_make(&a);
     hashmap<string, int32_t, basic_arena> hm = {};
     make_hashmap(&hm, &a, hash_key<string>, string_equal);
-    
-    typedef struct {
-        string key;
-        int32_t val;
-    } pair;
-    static const std::vector<pair> kvs = {
+
+    const std::vector<pair> kvs = {
         {string_from("1"), 1},
         {string_from("2"), 2},
-        {string_from("3"), 4},
+        {string_from("3"), 3},
     };
-    for (auto i = kvs.cbegin(); i != kvs.cend(); i++) {
-        hashmap_put(&hm, &i->key, &i->val);
+    for (size_t i = 0; i < kvs.size(); i++) {
+        const auto& kv = kvs[i];
+        hashmap_put(&hm, &kv.key, &kv.val);
     }
     
     for (auto i = hashmap_beg(&hm); i != hashmap_end(&hm); i++) {
-        printf("{%s, %d}", (*i).key->data, *((*i).val));
+        const auto kv = *i;
+        testing::logf(t, "{%s, %d}", kv.key->data, *(kv.val));
     }
 }
 #endif
@@ -226,6 +232,6 @@ int main(void)
 #endif
         new_case("test_slice_append", test_slice_append),
         new_case("test_basic_arena", test_basic_arena),
-        new_case("hashmap_put", test_basic_arena),
+        new_case("hashmap_put", test_hashmap),
     });
 }

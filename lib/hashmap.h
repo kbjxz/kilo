@@ -48,19 +48,18 @@ struct hashmap_iter {
         }
         return old;
     }
-    
-    
 
     hashmap<K, V, _>::kv_pair operator*() 
     {
-        return {&hm->keys[pos].value, &hm->vals[pos]};
+        return {&hm->keys[pos].val, &hm->vals[pos]};
     }
     
     bool operator==(const hashmap_iter& oth) {
         return hm == oth.hm && pos == oth.pos;
     }
+
     bool operator!=(const hashmap_iter& oth) {
-        return (*this) != oth;
+        return !((*this) == oth);
     }
 };
 
@@ -80,15 +79,21 @@ void make_hashmap(
     hm->arena = arena;
 
     hm->keys = {};
-    slice_reserve(&hm->keys, cap, arena);
+    slice_make_n(&hm->keys, cap, arena);
 
     hm->vals = {};
-    slice_reserve(&hm->vals, cap, arena);
+    slice_make_n(&hm->vals, cap, arena);
 }
+
+typedef const char* put_result;
+
+static put_result PUT_RESULT_INSERTED = "inserted";
+static put_result PUT_RESULT_UPDATED = "updated";
+static put_result PUT_RESULT_NO_FIT = "no_fit";
 
 // linear probing
 template <typename K, typename V, typename _>
-bool __hashmap_put_noresize(
+put_result __hashmap_put_noresize(
     typename hashmap<K, V, _>::key_slice* keys, 
     typename hashmap<K, V, _>::val_slice* vals,
     const typename hashmap<K, V, _>::key_type* key, 
@@ -98,20 +103,30 @@ bool __hashmap_put_noresize(
 )
 {
     const int32_t cap = keys->cap;
-    int32_t pos = hash(key) % cap;
-    for (auto i = pos; i != pos + cap; i++) {
-        maybe<K>& mkey = keys[i%cap];
+    const auto hash_val = hash(key);
+    const int32_t start = hash_val % cap;
+    put_result ret = PUT_RESULT_NO_FIT;
+    int32_t i = start;
+    for (; i != start + cap; i++) {
+        const auto pos = i < cap ? i : i % cap;
+        maybe<K>& mkey = slice_at(keys, pos);
         if (!mkey) {
-            keys[i] = some(*key);
-            vals[i] = *val;
-            return true;
+            slice_at(keys, pos) = some(*key);
+            slice_at(vals, pos) = *val;
+            ret = PUT_RESULT_INSERTED;
+            break;
         } else if (equal(key, &mkey.val)) {
-            V& v = vals[i];
+            V& v = slice_at(vals, pos);
             v = *val;
-            return true;
+            ret = PUT_RESULT_UPDATED;
+            break;
         }
     }
-    return false;
+
+#ifndef NDEBUG
+    printf("__hashmap_put_noresize: {hash_pos: %d=%o%%%d, tried: %d}\n", start, hash_val, cap, i-start);
+#endif
+    return ret;
 }
 
 
@@ -120,9 +135,9 @@ void __hashmap_resize(hashmap<K, V, A>* hm)
 {
     const int32_t new_cap = hm->cap * 2 + 1;
     slice<maybe<K>> new_keys = {};
-    slice_reserve(&new_keys, new_cap, hm->arena);
+    slice_make_n(&new_keys, new_cap, hm->arena);
     slice<V> new_vals = {};
-    slice_reserve(&new_vals, new_cap, hm->arena);
+    slice_make_n(&new_vals, new_cap, hm->arena);
     
     for (int32_t i = 0; i < hm->cap; i++) {
         if (!hm->keys[i]) {
@@ -131,7 +146,7 @@ void __hashmap_resize(hashmap<K, V, A>* hm)
         
         auto ok = __hashmap_put_noresize<K, V, A>(
             &new_keys, &new_vals, 
-            &hm->keys[i].value, &hm->vals[i], 
+            &hm->keys[i].val, &hm->vals[i], 
             hm->hash, hm->equal);
         assert(ok, "move kv failed");
     }
@@ -148,10 +163,14 @@ void hashmap_put(hashmap<K, V, A>* hm, const K* key, const V* val)
         __hashmap_resize(hm);
     }
 
-    auto ok =__hashmap_put_noresize<K, V, A>(
+    bool put =__hashmap_put_noresize<K, V, A>(
         &hm->keys, &hm->vals, key, val, 
         hm->hash, hm->equal);
-    assert(ok, "put failed");
+    assert(put, "put failed");
+
+    if (put) {
+        hm->len++;
+    }
 }
 
 template <typename K, typename V, typename _>
@@ -161,7 +180,7 @@ maybe<V*> hashmap_get(const hashmap<K, V, _>* hm, const K* key)
     const int32_t end = beg + hm->cap;
     for (auto i = beg; i != end; i++) {
         auto mkey = hm->keys[i];
-        if (mkey && equal(key, &mkey->value)) {
+        if (mkey && equal(key, &mkey->val)) {
             return some(hm->vals[i]);
         }
     }

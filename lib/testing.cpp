@@ -1,4 +1,5 @@
 #include "testing.h"
+#include <cstdlib>
 
 namespace testing {
 
@@ -42,7 +43,7 @@ namespace internal {
     {
         // print indents
         switch (h->indents) {
-            case 0: 
+            case 0:
             break; case 1: printf("\t");
             break; case 2: printf("\t\t");
             break; case 3: printf("\t\t\t");
@@ -96,21 +97,38 @@ namespace internal {
         printf("\n");
     }
 
+    bool* is_all_pass()
+    {
+        static bool is_pass = false;
+        return &is_pass;
+    }
+
+    void on_exit()
+    {
+        if (*is_all_pass()) {
+            printf("PASS\n");
+        } else {
+            printf("FAIL\n");
+        }
+    }
 } // end of intenral
+
 
 void main(std::initializer_list<case_t> tests)
 {
-    auto is_all_pass = true;
+    std::atexit(internal::on_exit);
+    bool* is_all_pass = internal::is_all_pass();
     for (auto beg = tests.begin(); beg != tests.end(); beg++) {
-        handle h;
+        handle h = {};
         test_setup(&h, beg, 0);
-        is_all_pass = (is_all_pass && test_run(&h));
+        const auto pass = test_run(&h);
+        *is_all_pass = ((*is_all_pass) && pass);
     }
-    if (is_all_pass) {
+    /* if (is_all_pass) {
         printf("PASS\n");
     } else {
         printf("FAIL\n");
-    }
+    } */
 }
 
 void test_setup(handle* h, const case_t* tc, handle* parent)

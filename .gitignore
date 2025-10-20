@@ -2,4 +2,5 @@
 .cache
 bin
 *.out
+not_test.cpp
 

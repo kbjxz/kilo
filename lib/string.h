@@ -6,20 +6,32 @@
 
 using string = slice<char>;
 
-template <std::size_t N>
+/* template <std::size_t N>
 const string string_from(const std::array<char, N>& a)
 {
-    return string{
-        .data = (char*)((void*)(a.data())),
+    auto ret = string{
+        .data = (char*)((void*)(&a[0])),
         .len  = a.size() - 1,
         .cap  = a.size() - 1,
     };
-}
+
+#ifndef NDEBUG
+    std::cout << "string_from(\"" << a.data() << "\"): " << ret.data << std::endl;
+#endif
+
+    return ret;
+} */
 
 template <std::size_t N>
 const string string_from(const char (&a)[N])
 {
-    return string_from(std::to_array(a));
+    auto ret = string{
+        .data = (char*)((void*)(&a[0])),
+        .len  = N - 1,
+        .cap  = N - 1,
+    };
+
+    return ret;
 }
 
 template <typename A>

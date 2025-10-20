@@ -41,6 +41,7 @@ void slice_make_n(slice<T>* s, size_t len, A* a)
 {
     s->data = arena_alloc<T>(a, len);
     assert(s->data, "arena_alloc failed");
+    s->len = len;
     s->cap = len;
 }
 
@@ -73,6 +74,13 @@ void slice_append(slice<T>* s, T v, A* a)
     }
     std::cout << "}" << std::endl;
 #endif
+}
+
+template <typename T>
+T& slice_at(slice<T>* s, size_t i)
+{
+    assert(i < s->len, "index out of bound");
+    return s->data[i];
 }
 
 template <typename T>
