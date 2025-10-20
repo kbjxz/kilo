@@ -1,95 +1,78 @@
 #ifndef ERR_H
 #define ERR_H
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <concepts>
 
-inline void panic(const char* s)
+inline void panic_errno(const char* s)
 {
     perror(s);
     exit(1);
 }
 
-inline void panic(void)
+/* inline void panic(void)
 {
+    exit(1);
+} */
+
+#define panic(fmt, ...)\
+internal::__panic_va(__FILE__, __LINE__ , fmt __VA_OPT__(,) __VA_ARGS__)
+
+#define assert(cond, fmt, ...)\
+internal::__assert(__FILE__, __LINE__, cond, fmt __VA_OPT__(,) __VA_ARGS__)
+
+namespace internal {
+
+typedef std::decay_t<decltype(__FILE__)> file_t;
+typedef std::decay_t<decltype(__LINE__)> line_t;
+
+void __panic(
+    file_t file,
+    line_t line,
+    const char* fmt, 
+    va_list args
+)
+{
+    fprintf(stderr, "panic: ");
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n\t%s:%d\n", file, line);
     exit(1);
 }
 
-template <typename F>
-requires std::is_invocable_v<F>
-void panic(const char* s, F cleanup)
+void __panic_va(
+    file_t file,
+    line_t line,
+    const char* fmt, 
+    ...
+)
 {
-    cleanup();
-    perror(s);
-    exit(1);
+    va_list args;
+    va_start(args, fmt);
+    __panic(file, line, fmt, args);
+    va_end(args);
 }
 
-struct error {
-    int err_no;
-    const char* msg;
-};
-
-template <typename T>
-struct maybe {
-    T value;
-    bool ok;
-    
-    operator bool()
-    {
-        return ok; 
-    }
-    T operator() ()
-    {
-        return value;
-    }
-};
-
-template <typename T>
-maybe<T> some(T v)
+inline void __assert(
+    std::decay_t<decltype(__FILE__)> file,
+    std::decay_t<decltype(__LINE__)> line,
+    bool cond, const char* fmt, ...
+)
 {
-    return maybe<T>{.value = v, .ok = true};
+    if (cond) {
+        return;
+    } 
+
+
+    va_list args;
+    va_start(args, fmt);
+    __panic(file, line, fmt, args);
+    va_end(args);
 }
 
-template <typename T>
-maybe<T> none()
-{
-    return maybe<T>{.value = {}, .ok = false};
 }
 
-template <typename T, typename Err = error>
-struct result {
-    maybe<Err> merr;
-    T value;
-    
-    operator bool ()
-    {
-        return !merr;
-    }
-};
 
-template <typename T, typename Err = error>
-result<T, Err> result_err(Err e)
-{
-    return result<T, Err>{.merr = some(e), .value ={}};
-}
-
-template <typename T, typename Err = error>
-result<T, Err> result_v(T v)
-{
-    return result<T, Err>{.merr = none<Err>(), .value =v};
-}
-
-template <typename _, typename Err>
-bool result_is_err(const result<_, Err>* r)
-{
-    return r->merr.ok;
-}
-
-template <typename _, typename Err>
-Err result_unwrap_err(const result<_, Err>* r)
-{
-    return r->merr.value;
-}
 
 #endif
