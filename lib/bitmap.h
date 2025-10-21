@@ -5,6 +5,8 @@
 
 typedef int64_t bitmap;
 
+#define BITMAP_ZERO 0
+
 inline void bitmap_set(bitmap* bm, int64_t i)
 {
     (*bm) = (*bm)|(1<<i);

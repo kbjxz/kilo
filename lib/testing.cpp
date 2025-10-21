@@ -105,7 +105,10 @@ namespace internal {
 
     test_state_t* get_test_state()
     {
-        static test_state_t state = {};
+        static test_state_t state = {
+            .test_cases_count = 0,
+            .pass_results = BITMAP_ZERO
+        };
         return &state;
     }
 

@@ -1,23 +1,21 @@
 #ifndef HASHMAP_H
 #define HASHMAP_H
 
-#include "slice.h"
+#include "bitmap.h"
 #include "string.h"
 
 template <typename K, typename V, typename A>
 requires is_arena_allocator<A>
 struct hashmap {
     typedef K key_type;
-    typedef slice<maybe<key_type>> key_slice;
     typedef V val_type;
-    typedef slice<V> val_slice;
     typedef A arena_type;
     typedef bool(*equal_func )(const K*, const K*) ;
-    typedef  size_t(*hash_func)(const K*) ;
-    typedef struct {
+    typedef size_t(*hash_func)(const K*) ;
+    struct kv_pair {
         const key_type* key; 
         val_type* val;
-    } kv_pair;
+    };
     
     static constexpr int load_factor = 6; // => 0.6
     
@@ -26,7 +24,8 @@ struct hashmap {
     hash_func hash;
     equal_func equal;
     A* arena;
-    slice<maybe<K>> keys;
+    bitmap key_map;
+    slice<K> keys;
     slice<V> vals;
     
     maybe<V*> operator[](const K* key)
@@ -44,14 +43,19 @@ struct hashmap_iter {
     {
         auto old = *this;
         pos++;
-        for (; pos != hm->cap && !hm->keys[pos]; pos++) {
+        for (;;) {
+            if (pos >= hm->cap || bitmap_get(&hm->key_map, pos)) {
+                break;
+            } else {
+                pos++;
+            }
         }
         return old;
     }
 
     hashmap<K, V, _>::kv_pair operator*() 
     {
-        return {&hm->keys[pos].val, &hm->vals[pos]};
+        return {&hm->keys[pos], &hm->vals[pos]};
     }
     
     bool operator==(const hashmap_iter& oth) {
@@ -72,105 +76,106 @@ void make_hashmap(
     int32_t cap = 32
 )
 {
-    hm->len = 0;
-    hm->cap = cap;
-    hm->hash = hash;
-    hm->equal = equal;
-    hm->arena = arena;
-
-    hm->keys = {};
+    *hm = hashmap<K, V, A>{
+        .len = 0,
+        .cap = cap,
+        .hash = hash,
+        .equal = equal,
+        .arena = arena,
+        .key_map = BITMAP_ZERO,
+        .keys = {},
+        .vals = {}
+    };
     slice_make_n(&hm->keys, cap, arena);
-
-    hm->vals = {};
     slice_make_n(&hm->vals, cap, arena);
 }
+
+namespace internal {
 
 typedef const char* put_result;
 
 static put_result PUT_RESULT_INSERTED = "inserted";
 static put_result PUT_RESULT_UPDATED = "updated";
-static put_result PUT_RESULT_NO_FIT = "no_fit";
+static put_result PUT_RESULT_FAILED = "failed";
 
 // linear probing
 template <typename K, typename V, typename _>
-put_result __hashmap_put_noresize(
-    typename hashmap<K, V, _>::key_slice* keys, 
-    typename hashmap<K, V, _>::val_slice* vals,
-    const typename hashmap<K, V, _>::key_type* key, 
-    const typename hashmap<K, V, _>::val_type* val,
-    typename hashmap<K, V, _>::hash_func hash,
-    typename hashmap<K, V, _>::equal_func equal
+put_result hashmap_put_noresize(
+    hashmap<K, V, _>* hm,
+    const K* key, 
+    const V* val
 )
 {
-    const int32_t cap = keys->cap;
-    const auto hash_val = hash(key);
+    const int32_t cap = hm->cap;
+    const auto hash_val = hm->hash(key);
     const int32_t start = hash_val % cap;
-    put_result ret = PUT_RESULT_NO_FIT;
+    put_result ret = PUT_RESULT_FAILED;
     int32_t i = start;
     for (; i != start + cap; i++) {
         const auto pos = i < cap ? i : i % cap;
-        maybe<K>& mkey = slice_at(keys, pos);
-        if (!mkey) {
-            slice_at(keys, pos) = some(*key);
-            slice_at(vals, pos) = *val;
+        if (!bitmap_get(&hm->key_map, pos)) {
+            slice_at(&hm->keys, pos) = *key;
+            slice_at(&hm->vals, pos) = *val;
             ret = PUT_RESULT_INSERTED;
             break;
-        } else if (equal(key, &mkey.val)) {
-            V& v = slice_at(vals, pos);
-            v = *val;
+        } else if (hm->equal(key, &hm->keys[pos])) {
+            slice_at(&hm->vals, pos) = *val;
             ret = PUT_RESULT_UPDATED;
             break;
         }
     }
 
+    if (ret == internal::PUT_RESULT_INSERTED) {
+        hm->len++;
+        bitmap_set(&hm->key_map, i < cap ? i : i % cap);
+    }
+
 #ifndef NDEBUG
     printf("__hashmap_put_noresize: {hash_pos: %d=%lo%%%d, tried: %d}\n", start, hash_val, cap, i-start);
 #endif
+
     return ret;
 }
 
 
 template <typename K, typename V, typename A>
-void __hashmap_resize(hashmap<K, V, A>* hm)
+void hashmap_resize(hashmap<K, V, A>* old)
 {
-    const int32_t new_cap = hm->cap * 2 + 1;
-    slice<maybe<K>> new_keys = {};
-    slice_make_n(&new_keys, new_cap, hm->arena);
-    slice<V> new_vals = {};
-    slice_make_n(&new_vals, new_cap, hm->arena);
+    hashmap<K, V, A> result = *old;
+    result.cap = old->cap * 2 + 1;
+    result.keys = {};
+    slice_make_n(&result.keys, result.cap, result.arena);
+    result.vals = {};
+    slice_make_n(&result.vals, result.cap, result.arena);
+    // const int32_t new_cap = old->cap * 2 + 1;
+    // slice<maybe<K>> new_keys = {};
+    // slice_make_n(&new_keys, new_cap, old->arena);
+    // slice<V> new_vals = {};
+    // slice_make_n(&new_vals, new_cap, old->arena);
     
-    for (int32_t i = 0; i < hm->cap; i++) {
-        if (!hm->keys[i]) {
+    for (int32_t i = 0; i < old->cap; i++) {
+        if (!bitmap_get(&old->key_map, i)) {
             continue;
         }
         
-        auto ok = __hashmap_put_noresize<K, V, A>(
-            &new_keys, &new_vals, 
-            &hm->keys[i].val, &hm->vals[i], 
-            hm->hash, hm->equal);
-        assert(ok, "move kv failed");
+        auto put_result = hashmap_put_noresize<K, V, A>(
+            &result, &old->keys[i], &old->vals[i]);
+        assert(put_result != PUT_RESULT_FAILED, "move kv failed");
     }
     
-    hm->cap = new_cap;
-    hm->keys = new_keys;
-    hm->vals = new_vals;
+    *old = result;    
 }
+} // end of internal
 
 template <typename K, typename V, typename A>
 void hashmap_put(hashmap<K, V, A>* hm, const K* key, const V* val)
 {
-    if (hm->len * 10 / hm->cap > hm->load_factor) {
-        __hashmap_resize(hm);
+    if (hm->len * 10 / hm->cap >= hm->load_factor) {
+        internal::hashmap_resize(hm);
     }
 
-    bool put =__hashmap_put_noresize<K, V, A>(
-        &hm->keys, &hm->vals, key, val, 
-        hm->hash, hm->equal);
-    assert(put, "put failed");
-
-    if (put) {
-        hm->len++;
-    }
+    auto put_result = internal::hashmap_put_noresize<K, V, A>(hm, key, val);
+    assert(put_result != internal::PUT_RESULT_FAILED, "put failed");
 }
 
 template <typename K, typename V, typename _>
@@ -193,8 +198,21 @@ hashmap_iter<K, V, _> hashmap_beg(hashmap<K, V, _>* hm)
     if (hm->len == 0) {
         return hashmap_end(hm);
     }
+
     int32_t pos = 0;
-    for (; !hm->keys[pos]; pos++) {}
+    for (;;) {
+        assert(pos != hm->cap, "there must be at least 1 kv-pair given len=%d", hm->len);
+        if (bitmap_get(&hm->key_map, pos)) {
+#ifndef NDEBUG
+        printf("hashmap_beg: key_map(%d)=true\n", pos);
+#endif
+            break;
+        }
+#ifndef NDEBUG
+        printf("hashmap_beg: key_map(%d)=false; ", pos);
+#endif
+        pos++;
+    }
     return hashmap_iter{.pos = pos, .hm = hm};
 }
 
@@ -204,12 +222,13 @@ hashmap_iter<K, V, _> hashmap_end(hashmap<K, V, _>* hm)
     return hashmap_iter{.pos = hm->cap, .hm = hm};
 }
 
+// Return 64-bit FNV-1a hash for key (NUL-terminated). See description:
+// https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
+inline uint64_t hash_bytes(const void* key, size_t n) {
+
 #define FNV_OFFSET 14695981039346656037UL
 #define FNV_PRIME 1099511628211UL
 
-// Return 64-bit FNV-1a hash for key (NUL-terminated). See description:
-// https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
-static uint64_t hash_bytes(const void* key, size_t n) {
     uint64_t hash = FNV_OFFSET;
     const auto ckey = (unsigned char*)key;
     for (size_t i = 0; i < n; i++) {
