@@ -2,7 +2,6 @@
 #define STRING_H
 
 #include "slice.h"
-#include <array>
 
 using string = slice<char>;
 

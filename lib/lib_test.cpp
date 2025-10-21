@@ -206,14 +206,13 @@ void test_hashmap(testing::handle* t)
     hashmap<string, int32_t, basic_arena> hm = {};
     make_hashmap(&hm, &a, hash_key<string>, string_equal);
 
-    const std::vector<pair> kvs = {
+    const pair kvs[] = {
         {string_from("1"), 1},
         {string_from("2"), 2},
         {string_from("3"), 3},
     };
-    for (size_t i = 0; i < kvs.size(); i++) {
-        const auto& kv = kvs[i];
-        hashmap_put(&hm, &kv.key, &kv.val);
+    for (auto i = std::begin(kvs); i != std::end(kvs); i++) {
+        hashmap_put(&hm, &i->key, &i->val);
     }
     
     for (auto i = hashmap_beg(&hm); i != hashmap_end(&hm); i++) {

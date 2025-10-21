@@ -124,7 +124,7 @@ put_result __hashmap_put_noresize(
     }
 
 #ifndef NDEBUG
-    printf("__hashmap_put_noresize: {hash_pos: %d=%o%%%d, tried: %d}\n", start, hash_val, cap, i-start);
+    printf("__hashmap_put_noresize: {hash_pos: %d=%lo%%%d, tried: %d}\n", start, hash_val, cap, i-start);
 #endif
     return ret;
 }

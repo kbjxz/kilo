@@ -1,4 +1,5 @@
 #include "testing.h"
+#include "bitmap.h"
 #include <cstdlib>
 
 namespace testing {
@@ -97,15 +98,21 @@ namespace internal {
         printf("\n");
     }
 
-    bool* is_all_pass()
+    struct test_state_t {
+        int64_t test_cases_count;
+        bitmap pass_results;
+    };
+
+    test_state_t* get_test_state()
     {
-        static bool is_pass = false;
-        return &is_pass;
+        static test_state_t state = {};
+        return &state;
     }
 
     void on_exit()
     {
-        if (*is_all_pass()) {
+        auto state = get_test_state();
+        if (bitmap_and(&state->pass_results, 0, state->test_cases_count)) {
             printf("PASS\n");
         } else {
             printf("FAIL\n");
@@ -117,18 +124,15 @@ namespace internal {
 void main(std::initializer_list<case_t> tests)
 {
     std::atexit(internal::on_exit);
-    bool* is_all_pass = internal::is_all_pass();
-    for (auto beg = tests.begin(); beg != tests.end(); beg++) {
+    auto state = internal::get_test_state();
+    for (size_t i = 0; i < tests.size(); i++) {
         handle h = {};
-        test_setup(&h, beg, 0);
-        const auto pass = test_run(&h);
-        *is_all_pass = ((*is_all_pass) && pass);
+        test_setup(&h, tests.begin()+i, 0);
+        const bool pass = test_run(&h);
+        if (pass) {
+            bitmap_set(&state->pass_results, i);
+        }
     }
-    /* if (is_all_pass) {
-        printf("PASS\n");
-    } else {
-        printf("FAIL\n");
-    } */
 }
 
 void test_setup(handle* h, const case_t* tc, handle* parent)
