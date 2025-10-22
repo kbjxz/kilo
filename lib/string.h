@@ -5,21 +5,21 @@
 
 using string = slice<char>;
 
-/* template <std::size_t N>
-const string string_from(const std::array<char, N>& a)
+const string string_from(const char* a)
 {
+    const auto len = strlen(a);
     auto ret = string{
         .data = (char*)((void*)(&a[0])),
-        .len  = a.size() - 1,
-        .cap  = a.size() - 1,
+        .len  = len - 1,
+        .cap  = len - 1,
     };
 
 #ifndef NDEBUG
-    std::cout << "string_from(\"" << a.data() << "\"): " << ret.data << std::endl;
+    std::cout << "string_from(\"" << a << "\"): " << ret.data << std::endl;
 #endif
 
     return ret;
-} */
+}
 
 template <std::size_t N>
 const string string_from(const char (&a)[N])

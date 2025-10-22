@@ -124,14 +124,15 @@ put_result hashmap_put_noresize(
             break;
         }
     }
-
+    
+    const int32_t final_pos = i < cap ? i : i % cap;
     if (ret == internal::PUT_RESULT_INSERTED) {
         hm->len++;
-        bitmap_set(&hm->key_map, i < cap ? i : i % cap);
+        bitmap_set(&hm->key_map, final_pos);
     }
 
 #ifndef NDEBUG
-    printf("__hashmap_put_noresize: {hash_pos: %d=%lo%%%d, tried: %d}\n", start, hash_val, cap, i-start);
+    printf("__hashmap_put_noresize: {hash_pos: %d=%lo%%%d, final_pos: %d, tried: %d}\n", start, final_pos, hash_val, cap, i-start);
 #endif
 
     return ret;

@@ -1,6 +1,7 @@
 #include "lib.h"
 #include "hashmap.h"
 #include <array>
+#include <cstdio>
 
 void test_defer(testing::handle* t)
 {
@@ -199,7 +200,7 @@ struct pair {
         int32_t val;
 };
 
-void test_hashmap(testing::handle* t)
+void test_hashmap_put_basic(testing::handle* t)
 {
     basic_arena a = {};
     basic_arena_make(&a);
@@ -220,6 +221,37 @@ void test_hashmap(testing::handle* t)
         testing::logf(t, "{%s, %d}", kv.key->data, *(kv.val));
     }
 }
+
+void test_hashmap_put_resize(testing::handle* t)
+{
+    basic_arena a = {};
+    basic_arena_make(&a);
+    static const int32_t init_cap = 32;
+    static const int32_t elem_count = 64;
+    std::vector<pair> kvs = {};    
+    kvs.reserve(elem_count);
+    for (auto i = 0; i < elem_count; i++) {
+        static const size_t buf_len = 3;
+        const int32_t val = i + 1;
+        auto buf = arena_alloc<char>(&a, 3);
+        snprintf(buf, buf_len, "%d", val);
+        kvs.push_back(pair{string_from(buf), val});
+    }
+
+
+    hashmap<string, int32_t, basic_arena> hm = {};
+    make_hashmap(&hm, &a, hash_key<string>, string_equal, init_cap);
+    
+    for (auto i = std::begin(kvs); i != std::end(kvs); i++) {
+        hashmap_put(&hm, &i->key, &i->val);
+    }
+    
+    for (auto i = hashmap_beg(&hm); i != hashmap_end(&hm); i++) {
+        const auto kv = *i;
+        testing::logf(t, "{%s, %d}", kv.key->data, *(kv.val));
+    }
+}
+
 #endif
 
 int main(void)
@@ -231,6 +263,7 @@ int main(void)
 #endif
         new_case("test_slice_append", test_slice_append),
         new_case("test_basic_arena", test_basic_arena),
-        new_case("hashmap_put", test_hashmap),
+        new_case("hashmap_put_basic", test_hashmap_put_basic),
+        new_case("hashmap_put_resize", test_hashmap_put_resize),
     });
 }
